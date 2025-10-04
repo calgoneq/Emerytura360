@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AreaChart,
@@ -122,19 +123,26 @@ export default function HeroGrowthChart({
   }, [schedule]);
 
   // --- OSTATNIA KROPKA: stała kropka + SMIL ring (r oraz opacity) ---
-  const LastDot = (props: any) => {
-    const { index, cx, cy } = props;
-    if (index !== data.length - 1) return null;
+  type LastDotProps = {
+    index?: number;
+    cx?: number;
+    cy?: number;
+  };
+
+  const LastDot = ({ index, cx, cy }: LastDotProps): ReactNode => {
+    if (typeof index !== "number" || index !== data.length - 1) return null;
+    if (typeof cx !== "number" || typeof cy !== "number") return null;
+
     return (
       <g>
         {/* stała kropka */}
         <circle cx={cx} cy={cy} r={4} fill={ZUS_GREEN} />
-        {/* ring SMIL: rośnie mocniej i zanika (zmienisz to="32"/"36" aby „bardziej rosło”) */}
+        {/* ring SMIL: rośnie i zanika w pętli */}
         <circle cx={cx} cy={cy} r={8} fill={ZUS_GREEN} opacity="0.5">
           <animate
             attributeName="r"
             from="8"
-            to="32"
+            to="32"             // zwiększ do 36/40, by „rosło bardziej”
             dur="1.8s"
             begin="0s"
             repeatCount="indefinite"
