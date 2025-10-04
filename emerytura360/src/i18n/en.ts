@@ -38,4 +38,27 @@ export const EN = {
   hiw_4_desc: 'Two numbers + comparisons.',
   hiw_5_title: 'What-if scenarios',
   hiw_5_desc: '+1/+2/+5 years with explanations.',
+
+  // form labels
+  form_age: 'Age',
+  form_sex: 'Sex',
+  form_salary: 'Gross salary (PLN/mo)',
+  form_start: 'Year started working',
+  form_retire: 'Planned retirement year',
+  form_zus_konto: 'ZUS account balance (optional)',
+  form_zus_sub: 'Sub-account balance (optional)',
+  form_expected: 'Expected pension (PLN/mo, opt.)',
+  form_postal: 'Postal code (opt.)',
+  form_quarter: 'Quarter award (1-4)',
+
+  // sex options
+  sex_m: 'Male',
+  sex_k: 'Female',
+
+  // simulation
+  sim_btn: 'Forecast my future pension',
+  sim_page_title: 'Simulation',
+
+  // form sections
+  form_basic: 'Required data',
 } as const;

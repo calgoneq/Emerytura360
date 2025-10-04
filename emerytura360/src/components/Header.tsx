@@ -14,7 +14,7 @@ export function Header() {
           aria-label="Strona ZUS"
           className="inline-flex items-center gap-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--zus-green)] rounded"
         >
-          <Image src="/zus-logo.png" alt="ZUS" width={90} height={22} priority />
+          <Image src="/zus-logo.png" alt="ZUS" width={90} height={22} style={{ height: 'auto' }}priority />
         </Link>
 
         {/* 🔒 Toggle na wierzchu i klikalny */}

@@ -38,4 +38,21 @@ export const PL = {
   hiw_4_desc: 'Dwie liczby + porównania.',
   hiw_5_title: 'Scenariusze „co-jeśli”',
   hiw_5_desc: '+1/+2/+5 lat z wyjaśnieniami.',
+
+  // form
+  form_age: 'Wiek',
+  form_sex: 'Płeć',
+  form_salary: 'Wynagrodzenie brutto (PLN/m-c)',
+  form_start: 'Rok rozpoczęcia pracy',
+  form_retire: 'Planowany rok zakończenia pracy',
+  form_zus_konto: 'Saldo na koncie ZUS (opcjonalnie)',
+  form_zus_sub: 'Saldo na subkoncie (opcjonalnie)',
+  form_expected: 'Oczekiwana emerytura (PLN/m-c, opcj.)',
+  form_postal: 'Kod pocztowy (opcj.)',
+  form_quarter: 'Kwartał waloryzacji (1-4)',
+  sex_m: 'Mężczyzna',
+  sex_k: 'Kobieta',
+  sim_btn: 'Zaprognozuj moją przyszłą emeryturę',
+  sim_page_title: 'Symulacja emerytury',
+  form_basic: 'Dane obowiązkowe',
 } as const;
