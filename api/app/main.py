@@ -509,7 +509,7 @@ def comparison_numbers(c: canvas.Canvas, x, y, w,
 
     # === Lewa kolumna: Twoja ===
     c.setFillColor(ZUS_NAVY); c.setFont(FONT_MAIN, 9)
-    c.drawCentredString(left_x, label_y, "Twoja (realna, m-c)")
+    c.drawCentredString(left_x, label_y, "Twoja (nominalna, m-c)")
     c.setFillColor(ZUS_BLACK); c.setFont(FONT_BOLD, 14)
     c.drawCentredString(left_x, value_y, fmt_money(my_value))
 
@@ -1177,8 +1177,9 @@ def report_pdf(payload: SimInput = Body(...)):
     y -= -80
     avg = result.get("avg_benefit_year") or 0
     comparison_numbers(
-        c, MARGIN_X, y - 90, total_w,  # box wysokości 90
-        result["benefit"]["real"], avg,
+        c, MARGIN_X, y - 90, total_w,
+        result["benefit"]["actual"],  # ← nominal
+        avg,
         f"Rok: {result['retire_year']}"
     )
     y -= (100 + 15)  # trochę mniejszy gap, bo pod tym rysujemy wykres
@@ -1192,8 +1193,8 @@ def report_pdf(payload: SimInput = Body(...)):
         c,
         chart_x, y - chart_h,    # X
         chart_w, chart_h,        # W (szerokość), H (wysokość)
-        labels=["Twoja (realna)", "Średnia"],
-        values=[float(result["benefit"]["real"] or 0), float(avg or 0)],
+        values=[float(result["benefit"]["actual"] or 0), float(avg or 0)],
+        labels=["Twoja (nominalna)", "Średnia"],
         colors_fill=[ZUS_BLUE, ZUS_GREEN]
     )
     y -= (chart_h + SECTION_GAP + 20)
@@ -1202,25 +1203,32 @@ def report_pdf(payload: SimInput = Body(...)):
     section_title(c, "Parametry wejściowe", MARGIN_X, y)
     y -= 18
     c.setFillColor(ZUS_BLACK); c.setFont(FONT_MAIN, 10)
+    gs = result.get("goal_seek", {})
+    sl = result.get("sick_leave_impact", {})
     inputs = [
+        # 1) Dane podstawowe
         f"Wiek: {payload.age}",
         f"Płeć: {payload.sex.upper()}",
-        f"Pensja brutto: {fmt_money(payload.gross_salary)}",
+        f"Kod pocztowy: {payload.postal_code or '—'}",
+
+        # 2) Kariera i parametry naliczania
+        f"Pensja brutto (dziś): {fmt_money(payload.gross_salary)}",
         f"Lata pracy: {payload.start_year}–{result['retire_year']}",
         f"Kwartał przyznania: {payload.quarter_award}",
         f"Uwzględniono L4: {'tak' if payload.include_sick_leave else 'nie'}",
-        f"Środki konto/subkonto: {fmt_money((payload.zus_balance.konto if payload.zus_balance else 0.0))} / {fmt_money((payload.zus_balance.subkonto if payload.zus_balance else 0.0))}",
+        f"Wpływ L4: {fmt_money(sl.get('loss_abs'))} ({fmt_pct(sl.get('loss_pct'))})",
+
+        # 3) Salda ZUS
+        f"Środki konto/subkonto: "
+        f"{fmt_money((payload.zus_balance.konto if payload.zus_balance else 0.0))} / "
+        f"{fmt_money((payload.zus_balance.subkonto if payload.zus_balance else 0.0))}",
+
+        # 4) Oczekiwania a prognoza
         f"Oczekiwana emerytura: {fmt_money(payload.expected_pension) if payload.expected_pension is not None else '—'}",
-        f"Kod pocztowy: {payload.postal_code or '—'}"
-    ]
-    gs = result.get("goal_seek", {})
-    sl = result.get("sick_leave_impact", {})
-    inputs.extend([
         f"Oczekiwana vs prognoza: {fmt_money(gs.get('expected'))} vs {fmt_money(result['benefit']['real'])}",
         f"Brakuje do oczekiwań: {fmt_money(gs.get('target_gap'))}",
-        f"Wpływ L4: {fmt_money(sl.get('loss_abs'))} ({fmt_pct(sl.get('loss_pct'))})",
-        f"Lata potrzebne: {gs.get('extra_years_needed') if gs.get('extra_years_needed') is not None else '>' + str(10)}"
-    ])
+        f"Lata potrzebne: {gs.get('extra_years_needed') if gs.get('extra_years_needed') is not None else '>' + str(10)}",
+    ]
     for line in inputs:
         y -= LINE_GAP; c.drawString(MARGIN_X, y, "• " + line)
 
