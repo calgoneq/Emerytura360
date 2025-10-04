@@ -240,7 +240,7 @@ export default function ResultPage() {
       if (document.referrer && new URL(document.referrer).origin === window.location.origin) {
         router.back();
       } else {
-        router.push('/symulacja');
+        router.push('/simulate');
       }
     } catch {
       router.push('/');
