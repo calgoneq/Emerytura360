@@ -64,26 +64,80 @@ MARGIN_TOP = 78      # górny margines (dla startu treści)
 SECTION_GAP = 22     # odstęp pionowy między sekcjami
 LINE_GAP = 14        # odstęp między linijkami tekstu
 
-# --- Typography ---
-FONT_MAIN = "Helvetica"
+# --- Typography (CSS-like font stack dla ReportLab) ---
+FONT_MAIN = "Helvetica"          # ostateczny fallback (Type1)
 FONT_BOLD = "Helvetica-Bold"
 
 def _register_polish_fonts():
+    """
+    Ustawia główną rodzinę czcionek wg kolejności jak w CSS:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial.
+    Szuka plików TTF/OTF w katalogu ./fonts oraz w typowych ścieżkach systemowych.
+    Pierwsza znaleziona para (Regular + Bold) staje się FONT_MAIN / FONT_BOLD.
+    Zawsze zostawia Helvetica jako ostateczny fallback.
+    """
+    import sys
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    # 1) Kolejność preferencji (nazwa logiczna, lista wzorców plików Regular, Bold)
+    PREFERRED = [
+        ("SFPro",              # -apple-system / system-ui na macOS
+         ["SFProText-Regular.otf", "SFUIText-Regular.otf", "SFNS.ttf"],
+         ["SFProText-Bold.otf", "SFUIText-Bold.otf", "SFNS-Bold.ttf"]),
+        ("SegoeUI",            # Windows (Segoe UI)
+         ["segoeui.ttf", "Segoe UI.ttf"],
+         ["segoeuib.ttf", "Segoe UI Bold.ttf"]),
+        ("Roboto",             # Android / web
+         ["Roboto-Regular.ttf"],
+         ["Roboto-Bold.ttf"]),
+        ("Arial",
+         ["Arial.ttf", "arial.ttf"],
+         ["Arial Bold.ttf", "arialbd.ttf"]),
+        # Bardzo dobry fallback z pełnymi znakami PL (dołącz jeśli chcesz)
+        ("DejaVuSans",
+         ["DejaVuSans.ttf"],
+         ["DejaVuSans-Bold.ttf"]),
+    ]
+
+    # 2) Gdzie szukać plików
+    search_dirs = [
+        str(FONTS_DIR),                         # ./fonts w projekcie
+        "/System/Library/Fonts", "/Library/Fonts",                       # macOS
+        "C:/Windows/Fonts",                                                         # Windows
+        "/usr/share/fonts", "/usr/local/share/fonts", "~/.local/share/fonts", "~/.fonts"  # Linux
+    ]
+    search_dirs = [os.path.expanduser(d) for d in search_dirs if os.path.isdir(os.path.expanduser(d))]
+
+    def _find_first(paths):
+        for base in search_dirs:
+            for name in paths:
+                p = os.path.join(base, name)
+                if os.path.isfile(p):
+                    return p
+        return None
+
+    def _try_register(alias, regular_candidates, bold_candidates):
+        reg = _find_first(regular_candidates)
+        bold = _find_first(bold_candidates)
+        if not reg or not bold:
+            return False
+        try:
+            pdfmetrics.registerFont(TTFont(alias, reg))
+            pdfmetrics.registerFont(TTFont(alias+"-Bold", bold))
+            return True
+        except Exception:
+            return False
+
+    # 3) Przejdź po stacku i wybierz pierwszą działającą parę
     global FONT_MAIN, FONT_BOLD
-    dejavu = FONTS_DIR / "DejaVuSans.ttf"
-    dejavu_bold = FONTS_DIR / "DejaVuSans-Bold.ttf"
-    try:
-        if dejavu.exists():
-            pdfmetrics.registerFont(TTFont("DejaVuSans", str(dejavu)))
-            FONT_MAIN = "DejaVuSans"
-        if dejavu_bold.exists():
-            pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", str(dejavu_bold)))
-            FONT_BOLD = "DejaVuSans-Bold"
-        else:
-            FONT_BOLD = FONT_MAIN
-    except Exception:
-        FONT_MAIN = "Helvetica"
-        FONT_BOLD = "Helvetica-Bold"
+    for alias, regs, bolds in PREFERRED:
+        if _try_register(alias, regs, bolds):
+            FONT_MAIN = alias
+            FONT_BOLD = alias + "-Bold"
+            break
+    # jeśli nic nie znaleziono, zostaje Helvetica/Helvetica-Bold
+    # (wtedy diakrytyki PL mogą być gorsze – najlepiej wrzuć Roboto/DejaVu do ./fonts)
 
 _register_polish_fonts()
 
@@ -503,8 +557,8 @@ def comparison_numbers(c: canvas.Canvas, x, y, w,
     mid_y    = y + box_h / 2.0
 
     LABEL_FS = 9
-    VALUE_FS_LEFT  = 12
-    VALUE_FS_RIGHT = 12
+    VALUE_FS_LEFT  = 14
+    VALUE_FS_RIGHT = 14
     LABEL_OFFSET = 10   # ile nad środkiem
     VALUE_OFFSET = 12   # ile pod środkiem
 
