@@ -1,0 +1,17 @@
+# Core web framework
+fastapi>=0.115.0,<1.0
+
+# ASGI server (run with: uvicorn api.main:app --reload)
+uvicorn[standard]>=0.30.0
+
+# Data validation (this project uses Pydantic v2 APIs like ConfigDict)
+pydantic>=2.7.0,<3.0
+
+# XLSX reading
+openpyxl>=3.1.2
+
+# PDF generation
+reportlab>=4.1.0
+
+# Optional: load variables from .env
+python-dotenv>=1.0.1
