@@ -1,6 +1,5 @@
-'use client';
-
-import React, { useEffect, useState } from 'react';
+"use client";
+import React, { Suspense,useEffect, useState } from 'react';
 import { useForm, type SubmitHandler } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -9,7 +8,7 @@ import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { useT } from '@/i18n';
 
 /** Helpers */
-const emptyToUndef = (v: unknown) => (v === '' ? undefined : v);
+const _emptyToUndef = (v: unknown) => (v === '' ? undefined : v);
 const nowYear = new Date().getFullYear();
 const SS_KEY = 'sim.form.v1';
 const EXPECTED_KEY = 'expected';
@@ -71,6 +70,14 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>;
 
 export default function SimulatePage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-black/60">Ładowanie…</div>}>
+      <SimulateInner />
+    </Suspense>
+  );
+}
+function SimulateInner() {
+
   const { t, lang } = useT();
   const router = useRouter();
   const params = useSearchParams();
@@ -199,11 +206,12 @@ if (expNum !== undefined) scrubbed.expected = expNum;
       const sim = await api.simulate(payload);
       const tl = await api.timeline(payload);
 
-      let wi: any = null;
-      try {
-        wi = await api.whatIf(payload);
-      } catch (e: any) {
-        console.warn('what-if failed:', e?.message ?? e);
+     let wi: unknown = null;
+try {
+  wi = await api.whatIf(payload);
+} catch (e: unknown) {
+  const msg = (e && typeof e === 'object' && 'message' in e) ? String((e as { message?: unknown }).message) : String(e);
+  console.warn('what-if failed:', msg);
         if (lang === 'pl') {
           setSubmitError((prev) => (prev ? prev + ' | ' : '') + 'Nie udało się policzyć scenariuszy (what-if).');
         } else {
@@ -215,25 +223,25 @@ if (expNum !== undefined) scrubbed.expected = expNum;
       sessionStorage.setItem('sim:input', JSON.stringify(payload));
       sessionStorage.setItem('sim:output', JSON.stringify(sim));
       sessionStorage.setItem('sim:timeline', JSON.stringify(tl));
-      sessionStorage.setItem('sim:whatif', JSON.stringify(wi ?? [])); 
-      if (wi) sessionStorage.setItem('sim:whatif', JSON.stringify(wi));
+      sessionStorage.setItem('sim:whatif', JSON.stringify(wi ?? []));
+if (wi) sessionStorage.setItem('sim:whatif', JSON.stringify(wi));
 
       router.push('/result');
-    } catch (e: any) {
-      const msg =
-        typeof e?.message === 'string'
-          ? e.message
-          : typeof e === 'string'
-          ? e
-          : (() => {
-              try {
-                return JSON.stringify(e);
-              } catch {
-                return lang === 'pl' ? 'Błąd API' : 'API error';
-              }
-            })();
-      setSubmitError(msg);
-    }
+    } catch (e: unknown) {
+  const msg =
+    (e && typeof e === 'object' && 'message' in e && typeof (e as any).message === 'string')
+      ? String((e as any).message)
+      : typeof e === 'string'
+      ? e
+      : (() => {
+          try {
+            return JSON.stringify(e);
+          } catch {
+            return lang === 'pl' ? 'Błąd API' : 'API error';
+          }
+        })();
+  setSubmitError(msg);
+}
   };
 
   /** UI style helpers */
@@ -413,4 +421,5 @@ if (expNum !== undefined) scrubbed.expected = expNum;
       </div>
     </div>
   );
+  
 }
