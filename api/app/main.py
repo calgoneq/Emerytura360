@@ -84,7 +84,7 @@ def _register_polish_fonts():
 _register_polish_fonts()
 
 # --- App ---
-app = FastAPI(title="Emerytura360 API", version="0.4.0")
+app = FastAPI(title="Eme360 API", version="0.4.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -420,7 +420,7 @@ def draw_header(c: canvas.Canvas, w, h, title: str):
 def draw_footer(c: canvas.Canvas, w):
     c.setFillColor(ZUS_GRAY); c.rect(0, 0, w, 26, fill=1, stroke=0)
     c.setFillColor(ZUS_NAVY); c.setFont(FONT_MAIN, 9)
-    c.drawRightString(w-MARGIN_X, 9, f"Emerytura360 • {dt.date.today().isoformat()}")
+    c.drawRightString(w-MARGIN_X, 9, f"Eme360 • {dt.date.today().isoformat()}")
 
 def section_title(c: canvas.Canvas, text: str, x: float, y: float):
     # tytuł sekcji z cienkim akcentem

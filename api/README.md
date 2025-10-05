@@ -1,4 +1,4 @@
-# Emerytura360 — backend (FastAPI)
+# Eme360 — backend (FastAPI)
 
 Szybki, „hackathon-ready” backend do symulatora emerytalnego.  
 Liczy świadczenie (nominalne i realne), pokazuje wpływ L4, porównuje do średniej, generuje PDF oraz zwraca timeline i warianty „what-if”. Wykorzystuje parametry roczne dostarczone przez mentorów (`parametry_mentor.xlsx`) oraz tabelę średnich świadczeń (`avg_benefit.xlsx`).

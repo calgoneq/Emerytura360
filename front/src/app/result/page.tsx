@@ -221,7 +221,7 @@ export default function ResultPage() {
       if (!win) {
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'raport_emerytura360.pdf';
+        a.download = 'raport_Eme360.pdf';
         a.click();
       }
     } catch (e: any) {
