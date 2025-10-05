@@ -54,37 +54,95 @@ ZUS_RED    = colors.Color(240/255, 94/255, 94/255)
 ZUS_BLACK  = colors.black
 ZUS_LIGHT_BG = colors.Color(246/255, 248/255, 251/255)  # delikatne tło sekcji
 
+# Dodatkowe akcenty do „annual report”
+ACCENT_YELLOW = colors.Color(255/255, 203/255, 0/255)
+ACCENT_TEAL   = colors.Color(0/255, 185/255, 185/255)
+
 # --- Layout constants for PDF ---
-MARGIN_X = 44        # lewy/prawy margines strony
+MARGIN_X = 32        # lewy/prawy margines strony
 MARGIN_TOP = 78      # górny margines (dla startu treści)
 SECTION_GAP = 22     # odstęp pionowy między sekcjami
 LINE_GAP = 14        # odstęp między linijkami tekstu
 
-# --- Typography ---
-FONT_MAIN = "Helvetica"
+# --- Typography (CSS-like font stack dla ReportLab) ---
+FONT_MAIN = "Helvetica"          # ostateczny fallback (Type1)
 FONT_BOLD = "Helvetica-Bold"
 
 def _register_polish_fonts():
+    """
+    Ustawia główną rodzinę czcionek wg kolejności jak w CSS:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial.
+    Szuka plików TTF/OTF w katalogu ./fonts oraz w typowych ścieżkach systemowych.
+    Pierwsza znaleziona para (Regular + Bold) staje się FONT_MAIN / FONT_BOLD.
+    Zawsze zostawia Helvetica jako ostateczny fallback.
+    """
+    import sys
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    # 1) Kolejność preferencji (nazwa logiczna, lista wzorców plików Regular, Bold)
+    PREFERRED = [
+        ("SFPro",              # -apple-system / system-ui na macOS
+         ["SFProText-Regular.otf", "SFUIText-Regular.otf", "SFNS.ttf"],
+         ["SFProText-Bold.otf", "SFUIText-Bold.otf", "SFNS-Bold.ttf"]),
+        ("SegoeUI",            # Windows (Segoe UI)
+         ["segoeui.ttf", "Segoe UI.ttf"],
+         ["segoeuib.ttf", "Segoe UI Bold.ttf"]),
+        ("Roboto",             # Android / web
+         ["Roboto-Regular.ttf"],
+         ["Roboto-Bold.ttf"]),
+        ("Arial",
+         ["Arial.ttf", "arial.ttf"],
+         ["Arial Bold.ttf", "arialbd.ttf"]),
+        # Bardzo dobry fallback z pełnymi znakami PL (dołącz jeśli chcesz)
+        ("DejaVuSans",
+         ["DejaVuSans.ttf"],
+         ["DejaVuSans-Bold.ttf"]),
+    ]
+
+    # 2) Gdzie szukać plików
+    search_dirs = [
+        str(FONTS_DIR),                         # ./fonts w projekcie
+        "/System/Library/Fonts", "/Library/Fonts",                       # macOS
+        "C:/Windows/Fonts",                                                         # Windows
+        "/usr/share/fonts", "/usr/local/share/fonts", "~/.local/share/fonts", "~/.fonts"  # Linux
+    ]
+    search_dirs = [os.path.expanduser(d) for d in search_dirs if os.path.isdir(os.path.expanduser(d))]
+
+    def _find_first(paths):
+        for base in search_dirs:
+            for name in paths:
+                p = os.path.join(base, name)
+                if os.path.isfile(p):
+                    return p
+        return None
+
+    def _try_register(alias, regular_candidates, bold_candidates):
+        reg = _find_first(regular_candidates)
+        bold = _find_first(bold_candidates)
+        if not reg or not bold:
+            return False
+        try:
+            pdfmetrics.registerFont(TTFont(alias, reg))
+            pdfmetrics.registerFont(TTFont(alias+"-Bold", bold))
+            return True
+        except Exception:
+            return False
+
+    # 3) Przejdź po stacku i wybierz pierwszą działającą parę
     global FONT_MAIN, FONT_BOLD
-    dejavu = FONTS_DIR / "DejaVuSans.ttf"
-    dejavu_bold = FONTS_DIR / "DejaVuSans-Bold.ttf"
-    try:
-        if dejavu.exists():
-            pdfmetrics.registerFont(TTFont("DejaVuSans", str(dejavu)))
-            FONT_MAIN = "DejaVuSans"
-        if dejavu_bold.exists():
-            pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", str(dejavu_bold)))
-            FONT_BOLD = "DejaVuSans-Bold"
-        else:
-            FONT_BOLD = FONT_MAIN
-    except Exception:
-        FONT_MAIN = "Helvetica"
-        FONT_BOLD = "Helvetica-Bold"
+    for alias, regs, bolds in PREFERRED:
+        if _try_register(alias, regs, bolds):
+            FONT_MAIN = alias
+            FONT_BOLD = alias + "-Bold"
+            break
+    # jeśli nic nie znaleziono, zostaje Helvetica/Helvetica-Bold
+    # (wtedy diakrytyki PL mogą być gorsze – najlepiej wrzuć Roboto/DejaVu do ./fonts)
 
 _register_polish_fonts()
 
 # --- App ---
-app = FastAPI(title="Eme360 API", version="0.4.0")
+app = FastAPI(title="Emerytura360 API", version="0.4.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -116,9 +174,18 @@ class SimInput(BaseModel):
     age: int = Field(..., ge=16, le=80)
     sex: str = Field(..., pattern="^[KkMm]$")
     gross_salary: float = Field(..., gt=0)
-    start_year: int
-    retire_year: Optional[int] = None
-    include_sick_leave: bool = True
+    start_year: int = Field(
+        ...,
+        description="Rok rozpoczęcia pracy (liczony od stycznia danego roku)."
+    )
+    retire_year: Optional[int] = Field(
+        None,
+        description="Planowany rok zakończenia aktywności zawodowej (styczeń). Domyślnie: osiągnięcie wieku 60 (K) / 65 (M)."
+    )
+    include_sick_leave: bool = Field(
+        True,
+        description="Uwzględnia średnią absencję chorobową (dni/rok) różną dla K/M."
+    )
     quarter_award: int = Field(3, ge=1, le=4)
     zus_balance: Optional[Balance] = None
     custom_wage_timeline: Optional[Dict[int, float]] = None
@@ -277,6 +344,10 @@ def wage_growth_rate() -> float:
     except Exception:
         return 0.03
 
+def statutory_retire_age(sex: str) -> int:
+    """Ustawowy wiek emerytalny: 60 lat K, 65 lat M."""
+    return 60 if str(sex).upper() == "K" else 65
+
 def _avg_growth_rate_from_tail(data: Dict[int, float], k: int = 5) -> float:
     if not data or len(data) < 2:
         return _fallback_growth()
@@ -407,12 +478,10 @@ KPI_GAP    = 18     # odstęp między kartami KPI
 COMPARE_H  = 90     # wysokość boxa "Porównanie ze średnią"
 NEG_GAP    = 80     # "negatywny" odstęp NAD boxem porównania (dodatnia wartość = podnosi box w górę)
 
-# --- PDF helpers ---
+# --- PDF helpers (stare; część zostaje, część poniżej nowa wersja) ---
 def draw_header(c: canvas.Canvas, w, h, title: str):
-    # „chorągiewka” ZUS: pasek w kolorze ZUS_NAVY + akcent ZUS_GREEN
     c.setFillColor(ZUS_NAVY); c.rect(0, h-72, w, 72, fill=1, stroke=0)
     c.setFillColor(ZUS_GREEN); c.rect(0, h-72, 8, 72, fill=1, stroke=0)
-
     c.setFillColor(colors.white)
     c.setFont(FONT_BOLD, 22); c.drawString(MARGIN_X, h-42, title)
     c.setFont(FONT_MAIN, 10); c.drawString(MARGIN_X, h-64, f"Data: {dt.date.today().isoformat()}")
@@ -420,10 +489,9 @@ def draw_header(c: canvas.Canvas, w, h, title: str):
 def draw_footer(c: canvas.Canvas, w):
     c.setFillColor(ZUS_GRAY); c.rect(0, 0, w, 26, fill=1, stroke=0)
     c.setFillColor(ZUS_NAVY); c.setFont(FONT_MAIN, 9)
-    c.drawRightString(w-MARGIN_X, 9, f"Eme360 • {dt.date.today().isoformat()}")
+    c.drawRightString(w-MARGIN_X, 9, f"Emerytura360 • {dt.date.today().isoformat()}")
 
 def section_title(c: canvas.Canvas, text: str, x: float, y: float):
-    # tytuł sekcji z cienkim akcentem
     c.setFillColor(ZUS_NAVY); c.setFont(FONT_BOLD, 12)
     c.drawString(x, y, text)
 
@@ -440,7 +508,6 @@ def wrap_text(c: canvas.Canvas, text: str, font: str, size: int, max_width: floa
             if cur:
                 lines.append(cur); cur = w
             else:
-                # bardzo długie słowo – przytnij
                 while c.stringWidth(w, font, size) > max_width and len(w) > 1:
                     w = w[:-1]
                 lines.append(w); cur = ""
@@ -450,20 +517,17 @@ def wrap_text(c: canvas.Canvas, text: str, font: str, size: int, max_width: floa
     return lines
 
 def kpi_card(c: canvas.Canvas, x, y, w, h, label: str, value: str, accent=ZUS_GREEN):
-    # kontener
     corner = 12
     c.setFillColor(colors.white)
     c.setStrokeColor(ZUS_GRAY)
     c.setLineWidth(0.8)
     c.roundRect(x, y, w, h, corner, fill=1, stroke=1)
 
-    # parametry typograficzne
-    LABEL_FS = 10   # ← rozmiar TEKSTU etykiety (np. „Świadczenie nominalne (m-c)”)
-    VALUE_FS = 16   # rozmiar liczby
+    LABEL_FS = 10
+    VALUE_FS = 16
     TOP_PAD = 16
     SIDE_PAD = 12
 
-    # etykieta
     c.setFillColor(ZUS_NAVY)
     label_lines = wrap_text(c, label, FONT_MAIN, LABEL_FS, w - 2*SIDE_PAD)
     c.setFont(FONT_MAIN, LABEL_FS)
@@ -472,108 +536,103 @@ def kpi_card(c: canvas.Canvas, x, y, w, h, label: str, value: str, accent=ZUS_GR
     for i, line in enumerate(label_lines):
         c.drawCentredString(x + w/2, base_y - i*line_h, line)
 
-    # wartość
     c.setFillColor(ZUS_BLACK)
     c.setFont(FONT_BOLD, VALUE_FS)
-    # bezpieczny odstęp od labelu
     safe_gap = 12
     value_y = base_y - len(label_lines)*line_h - safe_gap
-    # minimalny margines dolny
     value_y = max(value_y, y + 10)
     c.drawCentredString(x + w/2, value_y, value)
 
 def comparison_numbers(c: canvas.Canvas, x, y, w,
                        my_value: Optional[float],
-                       avg_value: Optional[float],
-                       year_label: str):
-    """Porównanie: tytuł + trzy kolumny wycentrowane (lewa/środek/prawa)."""
-    box_h = 65
+                       avg_value: Optional[float]):
+    box_h = 60
     c.setFillColor(colors.white); c.setStrokeColor(ZUS_GRAY)
     c.roundRect(x, y, w, box_h, 10, fill=1, stroke=1)
 
-    # Nagłówek sekcji (lewo) + rok (prawo)
-    c.setFillColor(ZUS_NAVY); c.setFont(FONT_BOLD, 12)
-    c.drawString(x+24, y+box_h-14, "Porównanie ze średnią")
-    c.setFont(FONT_MAIN, 10)
-    c.drawRightString(x+w-24, y+box_h-14, year_label)
+    # ★ Pozycje – środek boxa
+    left_x   = x + w * 0.25
+    center_x = x + w * 0.50
+    right_x  = x + w * 0.75
+    mid_y    = y + box_h / 2.0
 
-    # Pozycje kolumn – równo w 1/6, 3/6 i 5/6 szerokości pudełka
-    left_x   = x + w/6
-    center_x = x + w/2
-    right_x  = x + 5*w/6
+    LABEL_FS = 9
+    VALUE_FS_LEFT  = 14
+    VALUE_FS_RIGHT = 14
+    LABEL_OFFSET = 10   # ile nad środkiem
+    VALUE_OFFSET = 12   # ile pod środkiem
 
-    # Wysokości wierszy wewnątrz pudełka
-    label_y = y + box_h - 34      # opis (Twoja/Średnia)
-    value_y = label_y - 18        # kwoty
-    pill_y  = value_y - 2         # „badge” różnicy
+    # Lewa kolumna (Twoja)
+    c.setFillColor(ZUS_NAVY); c.setFont(FONT_MAIN, LABEL_FS)
+    c.drawCentredString(left_x,  mid_y + LABEL_OFFSET, "Twoja (nominalna, m-c)")
+    c.setFillColor(ZUS_BLACK); c.setFont(FONT_BOLD, VALUE_FS_LEFT)
+    c.drawCentredString(left_x,  mid_y - VALUE_OFFSET, fmt_money(my_value))
 
-    # === Lewa kolumna: Twoja ===
-    c.setFillColor(ZUS_NAVY); c.setFont(FONT_MAIN, 9)
-    c.drawCentredString(left_x, label_y, "Twoja (realna, m-c)")
-    c.setFillColor(ZUS_BLACK); c.setFont(FONT_BOLD, 14)
-    c.drawCentredString(left_x, value_y, fmt_money(my_value))
+    # Prawa kolumna (Średnia)
+    if not avg_value or avg_value <= 0: avg_value = 0.0
+    c.setFillColor(ZUS_NAVY); c.setFont(FONT_MAIN, LABEL_FS)
+    c.drawCentredString(right_x, mid_y + LABEL_OFFSET, "Średnia")
+    c.setFillColor(ZUS_BLACK); c.setFont(FONT_BOLD, VALUE_FS_RIGHT)
+    c.drawCentredString(right_x, mid_y - VALUE_OFFSET, fmt_money(avg_value))
 
-    # === Prawa kolumna: Średnia ===
-    if not avg_value or avg_value <= 0:
-        avg_value = 0.0  # bez danych – pokaż 0.00 zł i „—” w badge
-    c.setFillColor(ZUS_NAVY); c.setFont(FONT_MAIN, 9)
-    c.drawCentredString(right_x, label_y, "Średnia")
-    c.setFillColor(ZUS_BLACK); c.setFont(FONT_BOLD, 14)
-    c.drawCentredString(right_x, value_y, fmt_money(avg_value))
-
-    # === Środkowa kolumna: badge różnicy ===
+    # Badge ze środkiem w boxie
     diff_pct = None
     if avg_value > 0 and my_value is not None:
         diff_pct = (my_value - avg_value) / avg_value * 100.0
-
-    badge_text = "—"
-    badge_color = ZUS_ORANGE
+    badge_text = "—"; badge_color = ZUS_ORANGE
     if diff_pct is not None:
         badge_text = f"{diff_pct:+.2f}%"
-        if diff_pct >= 5:
-            badge_color = ZUS_GREEN
-        elif diff_pct <= -5:
-            badge_color = ZUS_RED
+        if diff_pct >= 5: badge_color = ZUS_GREEN
+        elif diff_pct <= -5: badge_color = ZUS_RED
 
-    pill_w, pill_h = 74, 22
+    pill_w, pill_h = 50, 16
     pill_x = center_x - pill_w/2
-    c.setFillColor(badge_color)
-    c.roundRect(pill_x, pill_y, pill_w, pill_h, 6, fill=1, stroke=0)
+    pill_y = mid_y - pill_h/2 - 20  # ★ idealne wycentrowanie
+    c.setFillColor(badge_color); c.setStrokeColor(colors.white); c.setLineWidth(1.2)
+    c.roundRect(pill_x, pill_y, pill_w, pill_h, 7, fill=1, stroke=1)
     c.setFillColor(colors.white); c.setFont(FONT_BOLD, 10)
     c.drawCentredString(center_x, pill_y + pill_h/2 - 3, badge_text)
 
+def fmt_money_pl_short(v: float) -> str:
+    # skrót „mln/tys.” + polskie separatory
+    if v >= 2_000_000:
+        s = f"{v/1_000_000:.1f}".replace(".", ",")
+        return f"{s} mln zł"
+    if v >= 20_000:
+        s = str(int(round(v/1000)))  # tysiące bez dziesiętnych
+        return f"{s} tys. zł"
+    # format z miejscami dziesiętnymi: spacje tysięcy, przecinek dziesiętnych
+    s = f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", " ")
+    return f"{s} zł"
+
+
 def draw_simple_bar_chart(c: canvas.Canvas, x, y, w, h, labels, values, colors_fill=None):
-    """
-    Bardzo prosty wykres słupkowy: 2-3 słupki, z podpisami i wartościami nad słupkami.
-    labels: ["Twoja (realna)", "Średnia"]
-    values: [float, float]
-    """
     n = len(values)
     if n == 0:
         return
     max_v = max(values) if max(values) > 0 else 1.0
 
-    # rama/tyło
+    # ramka
     c.setFillColor(colors.white)
     c.setStrokeColor(ZUS_GRAY)
     c.roundRect(x, y, w, h, 10, fill=1, stroke=1)
 
-    # marginesy wewnętrzne
+    # marginesy wewnętrzne (trochę większy top na etykiety)
     pad_x = 24
-    pad_top = 28
-    pad_bottom = 28
+    pad_top = 32
+    pad_bottom = 34
     chart_x = x + pad_x
     chart_w = w - 2*pad_x
     chart_y = y + pad_bottom
     chart_h = h - pad_top - pad_bottom
 
-    # os Y (linia bazowa)
+    # oś
     c.setStrokeColor(ZUS_GRAY)
     c.setLineWidth(0.6)
     c.line(chart_x, chart_y, chart_x + chart_w, chart_y)
 
-    # szerokości słupków i odstępy
-    gap = chart_w * 0.12 / max(1, n)  # niewielki odstęp
+    # rozstaw słupków
+    gap = chart_w * 0.12 / max(1, n)
     bar_w = (chart_w - gap * (n + 1)) / n
 
     for i, v in enumerate(values):
@@ -587,25 +646,119 @@ def draw_simple_bar_chart(c: canvas.Canvas, x, y, w, h, labels, values, colors_f
         else:
             c.setFillColor(ZUS_BLUE if i == 0 else ZUS_GREEN)
 
-        # słupek
         c.rect(bx, by, bar_w, bh, fill=1, stroke=0)
 
-        # wartość nad słupkiem (nie wyjeżdża ponad ramkę)
-        val_y = by + bh + 10
-        top_limit = y + h - 10            # górna granica wnętrza boxa
-        val_y = min(val_y, top_limit)
+        # --- Etykieta wartości (PL, skróty) ---
+        label = fmt_money_pl_short(v)
 
-        c.setFillColor(ZUS_BLACK); c.setFont(FONT_BOLD, 10)
-        c.drawCentredString(bx + bar_w/2, val_y, fmt_money(v))
+        # Dopuszczamy minimalny rozmiar 6 pt.
+        # Dodatkowo pozwalamy napisie „wystawać” maksymalnie do połowy szczeliny (gap),
+        # żeby uniknąć cięcia na „…”, ale też nie wpadać na sąsiedni słupek.
+        value_fs = 8
+        max_label_width = bar_w + gap * 0.5
+        while c.stringWidth(label, FONT_BOLD, value_fs) > max_label_width and value_fs > 6:
+            value_fs -= 1
 
-        # etykieta pod słupkiem
-        c.setFillColor(ZUS_NAVY); c.setFont(FONT_MAIN, 9)
+        # Jedna, stała wysokość dla wszystkich etykiet nad słupkiem
+        val_y = min(by + bh + 12, y + h - 10)
+
+        c.setFillColor(ZUS_BLACK)
+        c.setFont(FONT_BOLD, value_fs)
+        c.drawCentredString(bx + bar_w/2, val_y, label)
+
+        # --- Oś X (co 1, ale będzie miejsce dzięki większym odstępom i rotacji powyżej) ---
+        c.setFillColor(ZUS_NAVY)
+        c.setFont(FONT_MAIN, 9)
         c.drawCentredString(bx + bar_w/2, y + 6, labels[i])
 
 def bullet_line(c: canvas.Canvas, x, y, text, color=ZUS_GREEN):
     c.setFillColor(color); c.circle(x, y+3, 2.6, fill=1, stroke=0)
     c.setFillColor(ZUS_NAVY); c.setFont(FONT_MAIN, 10)
     c.drawString(x+10, y, text)
+
+# ======== NOWE HELPERY do layoutu „annual report” (prawa szpalta + donuty) ========
+
+def draw_right_panel_bg(c: canvas.Canvas, w, h):
+    """Prawa połowa w kolorze ZUS_NAVY."""
+    right_x = int(w * 0.5)
+    c.setFillColor(ZUS_NAVY)
+    c.rect(right_x, 0, w-right_x, h, fill=1, stroke=0)
+    c.setFillColor(ZUS_GREEN)
+    c.rect(right_x, h-2, w-right_x, 2, fill=1, stroke=0)
+
+def donut(c: canvas.Canvas, cx, cy, r_outer, r_inner, segments, labels=None,
+          legend_x=None, legend_y=None, legend_leading=12):
+    """
+    segments = [(fraction_0to1, color, optional_label)]
+    """
+    total = sum(s[0] for s in segments) or 1.0
+    angle0 = 90.0  # start od góry
+    for frac, color_, *_ in segments:
+        sweep = 360.0 * (frac/total)
+        c.setFillColor(color_); c.setStrokeColor(color_)
+        c.wedge(cx-r_outer, cy-r_outer, cx+r_outer, cy+r_outer, angle0, angle0+sweep, stroke=0, fill=1)
+        angle0 += sweep
+    c.setFillColor(colors.white)
+    c.circle(cx, cy, r_inner, fill=1, stroke=0)
+
+    # legenda
+    if legend_x is not None and labels:
+        c.setFont(FONT_MAIN, 8)
+        for i, ((frac, color_, *_), lab) in enumerate(zip(segments, labels)):
+            c.setFillColor(color_)
+            c.circle(legend_x, legend_y - i*legend_leading + 3, 3, fill=1, stroke=0)
+            c.setFillColor(colors.white)
+            c.drawString(legend_x + 10, legend_y - i*legend_leading, lab)
+
+def rr_gauge(c: canvas.Canvas, cx: float, cy: float, r_outer: float, r_inner: float,
+             rr_frac: float, title: str = "Stopa zastąpienia"):
+    """
+    Prosty „gauge” w formie pierścienia dla RR.
+    rr_frac: 0.0–1.0 (np. 0.1561 dla 15.61%)
+    """
+    rr = max(0.0, min(1.0, rr_frac))
+
+    # wypełnienie
+    c.setFillColor(ZUS_ORANGE)
+    c.wedge(cx - r_outer, cy - r_outer, cx + r_outer, cy + r_outer,
+            90, 90 + 360 * rr, stroke=0, fill=1)
+    c.setFillColor(ZUS_GRAY)
+    c.wedge(cx - r_outer, cy - r_outer, cx + r_outer, cy + r_outer,
+            90 + 360 * rr, 450, stroke=0, fill=1)
+
+    # dziura w środku (pierścień)
+    c.setFillColor(colors.white)
+    c.circle(cx, cy, r_inner, fill=1, stroke=0)
+
+    # tytuł + wartość w środku
+    c.setFillColor(colors.white); c.setFont(FONT_BOLD, 18)
+    c.drawString(cx - r_outer, cy + r_outer + 22, title)
+
+    c.setFillColor(colors.white); c.setFont(FONT_BOLD, 20)
+    c.drawCentredString(cx, cy + 2, f"{rr*100:.2f}%")
+
+
+def section_heading(c: canvas.Canvas, text: str, x: float, y: float, light=False):
+    c.setFont(FONT_BOLD, 18)
+    c.setFillColor(colors.white if light else ZUS_NAVY)
+    c.drawString(x, y, text)
+
+def stat_bar(c: canvas.Canvas, x, y, w, pct, label, bar_color):
+    """Pasek postępu w stylu prostych statystyk."""
+    h = 14
+    c.setFillColor(ZUS_GRAY); c.rect(x, y, w, h, fill=1, stroke=0)
+    c.setFillColor(bar_color); c.rect(x, y, w*max(0.0, min(1.0, pct)), h, fill=1, stroke=0)
+    c.setFillColor(ZUS_NAVY); c.setFont(FONT_MAIN, 9)
+    c.drawString(x, y-16, label)
+    c.setFont(FONT_BOLD, 10); c.drawRightString(x+w, y-12, f"{int(max(0,min(100, pct*100)))}%")
+
+def kpi_circle(c: canvas.Canvas, cx, cy, r, title, value, sub=None):
+    c.setFillColor(colors.white); c.circle(cx, cy, r, fill=1, stroke=0)
+    c.setFillColor(ZUS_NAVY); c.setFont(FONT_MAIN, 9)
+    c.drawCentredString(cx, cy+r+10, title)
+    c.setFont(FONT_BOLD, 16); c.drawCentredString(cx, cy+2, value)
+    if sub:
+        c.setFont(FONT_MAIN, 8); c.setFillColor(ZUS_GRAY); c.drawCentredString(cx, cy-12, sub)
 
 # --- API Endpoints ---
 @app.get("/assumptions")
@@ -628,7 +781,7 @@ def get_assumptions():
 def simulate(payload: SimInput):
     today = dt.date.today()
     current_year = today.year
-    retire_year = payload.retire_year or (today.year + max(0, 60 - payload.age))
+    retire_year = payload.retire_year or (today.year + max(0, statutory_retire_age(payload.sex) - payload.age))
 
     # Walidacje wejścia (przyjazne 400)
     if payload.start_year >= (payload.retire_year or retire_year):
@@ -861,11 +1014,13 @@ def simulate_timeline(payload: SimInput, format: Optional[str] = Query(None)):
     - base_after_indexation (po waloryzacji kwartalnej w danym roku)
     - benefit_if_retire_in_year: {nominal, real}
     """
+    _fmt = format if isinstance(format, (str, type(None))) else None
     today = dt.date.today()
     current_year = today.year
     start_y = payload.start_year
-    end_y = payload.retire_year or (today.year + max(0, 60 - payload.age))
-    retire_year = payload.retire_year or (today.year + max(0, 60 - payload.age))
+    default_retire_year = today.year + max(0, statutory_retire_age(payload.sex) - payload.age)
+    end_y = payload.retire_year or default_retire_year
+    retire_year = payload.retire_year or default_retire_year
 
     # Walidacje wejścia (przyjazne 400)
     if payload.start_year >= (payload.retire_year or retire_year):
@@ -936,10 +1091,9 @@ def simulate_timeline(payload: SimInput, format: Optional[str] = Query(None)):
     base_running = 0.0  # skumulowana baza po WALORYZACJI ROCZNEJ do końca danego roku
 
     for y in range(start_y, end_y):
-        # 1) Składka za rok y (po limitach i L4) i waloryzacja roczna tej jednej pozycji
         wage_y = wages.get(y, payload.gross_salary)
-        monthly_base = _cap_base_monthly(y, wage_y)              # m-c cap 2.5× (opcjonalny)
-        annual_base = annual_base_with_30x_cap(y, monthly_base)  # roczny cap 30×
+        monthly_base = _cap_base_monthly(y, wage_y)
+        annual_base = annual_base_with_30x_cap(y, monthly_base)
         contr_y = annual_base * 0.1952 * l4_factor_for_year(y)
 
         rocznie = waloryzuj_rocznie({y: contr_y})
@@ -948,19 +1102,17 @@ def simulate_timeline(payload: SimInput, format: Optional[str] = Query(None)):
         else:
             add_indexed = float(rocznie)
 
-        base_running += add_indexed  # baza po waloryzacji rocznej (sumowana)
+        base_running += add_indexed
 
-        # 2) Waloryzacja kwartalna tej BAZY (tu MUSI być float, nie dict!)
         base_after_q = waloryzuj_kwartalnie_po_31_stycznia(y, payload.quarter_award, base_running)
 
-        # 3) Dodanie konta/subkonta i policzenie świadczenia w roku y
         konto = (payload.zus_balance.konto if payload.zus_balance else 0.0) or 0.0
         subkonto = (payload.zus_balance.subkonto if payload.zus_balance else 0.0) or 0.0
         podstawa_y = base_after_q + konto + subkonto
 
         months = expected_life_months(payload.sex, y)
         nominal = annuitetyzuj(podstawa_y, months)
-        real = urealnij(nominal, cpi, max(0, y - today.year))
+        real = urealnij(nominal, cpi, max(0, y - dt.date.today().year))
 
         out.append({
             "year": y,
@@ -971,10 +1123,10 @@ def simulate_timeline(payload: SimInput, format: Optional[str] = Query(None)):
             }
         })
 
-    if (format or "").lower() == "csv":
-        import csv, io
-        buf = io.StringIO()
-        w = csv.writer(buf)
+    if (_fmt or "").lower() == "csv":
+        import csv as _csv, io as _io
+        buf = _io.StringIO()
+        w = _csv.writer(buf)
         w.writerow(["year", "base_after_indexation", "benefit_nominal", "benefit_real"])
         for row in out:
             w.writerow([
@@ -1038,7 +1190,7 @@ def simulate_explain(payload: SimInput):
     # powtórzenie kluczowych fragmentów z /simulate (lokalnie, bez loga do CSV)
     today = dt.date.today()
     current_year = today.year
-    retire_year = payload.retire_year or (today.year + max(0, 60 - payload.age))
+    retire_year = payload.retire_year or (today.year + max(0, statutory_retire_age(payload.sex) - payload.age))
 
     def _closest_year(d: Dict[int, dict], target: int) -> Optional[int]:
         if not d: return None
@@ -1128,6 +1280,7 @@ def get_buckets(year: Optional[int] = None):
     y = year or dt.date.today().year
     return buckets_for_year(y)
 
+# ---------- PODMIANA LAYOUTU PDF pod TYM SAMYM endpointem /report/pdf ----------
 @app.post(
     "/report/pdf",
     responses={200: {"content": {"application/pdf": {"schema": {"type":"string","format":"binary"}}},
@@ -1137,117 +1290,253 @@ def report_pdf(payload: SimInput = Body(...)):
     result = simulate(payload)
 
     buffer = io.BytesIO()
-    pdf_name = "raport_emerytura.pdf"  # <-- jedna zmienna na nazwę
+    pdf_name = "raport_emerytura.pdf"
     c = canvas.Canvas(buffer, pagesize=A4)
-    c.setTitle(pdf_name)               # <-- to ustawia tytuł dokumentu PDF
+    c.setTitle(pdf_name)
     w, h = A4
 
-    # HEADER
-    draw_header(c, w, h, "Raport prognozowanej emerytury")
+    # --- PANEL: pełna szerokość (z marginesami) ---
+    panel_x = MARGIN_X
+    panel_w = w - 2 * MARGIN_X
 
-    # Start Y – poniżej headera
-    y = h - MARGIN_TOP - 96
+    # Tytuł
+    title_y = h - 96
+    c.setFillColor(ZUS_NAVY)
+    c.setFont(FONT_BOLD, 30); c.drawString(panel_x, title_y, "Raport 2025")
+    c.setFont(FONT_BOLD, 22); c.drawString(panel_x, title_y - 28, "Prognoza Emerytury")
 
-    # ========== SEKCJA: KPI (3 karty) ==========
-    total_w = w - 2*MARGIN_X
-    gap = 18
-    card_h = 64
-    card_w = (total_w - 2*gap) / 3.0
-    x = MARGIN_X
+    # KPI (2 kolumny nad całą stroną)
+    y = title_y - 70
+    kpi_gap = 64
+    kpi_left_x  = panel_x
+    kpi_right_x = panel_x + panel_w/2 + 24
 
-    kpi_card(
-        c, x + 0*(card_w+gap), y, card_w, card_h,
-        "Świadczenie nominalne (m-c)",
-        fmt_money(result['benefit']['actual']), ZUS_GREEN
-    )
-    kpi_card(
-        c, x + 1*(card_w+gap), y, card_w, card_h,
-        "Świadczenie realne (dzisiaj, m-c)",
-        fmt_money(result['benefit']['real']), ZUS_BLUE
-    )
-    rr = result.get("replacement_rate_percent")
-    kpi_card(
-        c, x + 2*(card_w+gap), y, card_w, card_h,
-        "Stopa zastąpienia",
-        fmt_pct(rr), ZUS_ORANGE
-    )
-    y -= (card_h + SECTION_GAP)
+    c.setFont(FONT_MAIN, 10); c.setFillColor(ZUS_NAVY)
+    c.drawString(kpi_left_x,  y, "Nominalne (m-c)")
+    c.drawString(kpi_right_x, y, "Realne dziś (m-c)")
 
-    # ========== SEKCJA: Porównanie ze średnią ==========
-    y -= -80
-    avg = result.get("avg_benefit_year") or 0
+    y -= 20
+    c.setFont(FONT_BOLD, 18); c.setFillColor(ZUS_BLACK)
+    c.drawString(kpi_left_x,  y, fmt_money(result['benefit']['actual']))
+    c.drawString(kpi_right_x, y, fmt_money(result['benefit']['real']))
+
+    # --- Dwie kolumny treści głównej ---
+    GUTTER = 28
+    col_w = (panel_w - GUTTER) / 2
+    left_x  = panel_x
+    right_x = panel_x + col_w + GUTTER
+
+    # Stałe odstępy
+    HEADING_GAP   = 36
+    SECTION_GAP_Y = 16
+    BAR_SPACING   = 34
+
+    # Start kolumn pod KPI
+    left_y  = y - HEADING_GAP
+    right_y = y - HEADING_GAP
+
+    # ===== LEWA KOLUMNA: „Najważniejsze wskaźniki” (4 paski) =====
+    section_heading(c, "Najważniejsze wskaźniki", left_x, left_y)
+    left_y -= SECTION_GAP_Y + 16
+
+    # 1) Utrata z L4
+    imp = result.get("sick_leave_impact", {})
+    loss_pct = max(0.0, min(1.0, (imp.get("loss_pct") or 0) / 100.0))
+    stat_bar(c, left_x, left_y, col_w, loss_pct, "Utrata z L4 (proc.)", ZUS_ORANGE)
+    left_y -= BAR_SPACING
+
+    # 2) Progres vs oczekiwania
+    gs = result.get("goal_seek", {})
+    tgt = float(gs.get("expected") or 0)
+    prog = float(result['benefit']['real'] or 0)
+    pct_goal = 0 if tgt <= 0 else max(0.0, min(1.0, prog / tgt))
+    stat_bar(c, left_x, left_y, col_w, pct_goal, "Progres względem oczekiwań", ZUS_GREEN)
+    left_y -= BAR_SPACING
+
+    # 3) Twoja nominalna vs średnia
+    avg_nom = float(result.get("avg_benefit_year") or 0)
+    pct_vs_avg = 0 if avg_nom <= 0 else max(0.0, min(1.0, float(result['benefit']['actual']) / avg_nom))
+    stat_bar(c, left_x, left_y, col_w, pct_vs_avg, "Twoja nominalna vs średnia", ZUS_BLUE)
+    left_y -= BAR_SPACING
+
+    # 4) RR – stopa zastąpienia
+    rr_pct = max(0.0, min(1.0, (result.get("replacement_rate_percent") or 0) / 100.0))
+    stat_bar(c, left_x, left_y, col_w, rr_pct, "Stopa zastąpienia (RR)", ACCENT_TEAL)
+    left_y -= (BAR_SPACING + 6)
+
+    # ===== PRAWA KOLUMNA: Porównanie + Założenia =====
+    section_heading(c, "Porównanie ze średnią", right_x, right_y)
+    right_y -= (SECTION_GAP_Y + 4)
+
+    # Box z liczbami (stała wysokość 65)
+    cmp_h = 65
     comparison_numbers(
-        c, MARGIN_X, y - 90, total_w,  # box wysokości 90
-        result["benefit"]["real"], avg,
-        f"Rok: {result['retire_year']}"
-    )
-    y -= (100 + 15)  # trochę mniejszy gap, bo pod tym rysujemy wykres
-
-    # prosty wykres słupkowy: Twoja (realna) vs Średnia
-    chart_h = 110
-    chart_w = total_w * 0.5                  # <- nowa szerokość wykresu (80% szerokości treści)
-    chart_x = MARGIN_X + (total_w - chart_w)/2  # <- wycentrowanie względem treści
-
-    draw_simple_bar_chart(
         c,
-        chart_x, y - chart_h,    # X
-        chart_w, chart_h,        # W (szerokość), H (wysokość)
-        labels=["Twoja (realna)", "Średnia"],
-        values=[float(result["benefit"]["real"] or 0), float(avg or 0)],
-        colors_fill=[ZUS_BLUE, ZUS_GREEN]
+        x=right_x,
+        y=right_y - cmp_h,  # y w tej funkcji to dolna krawędź
+        w=col_w,
+        my_value=float(result["benefit"]["actual"]),
+        avg_value=avg_nom,
     )
-    y -= (chart_h + SECTION_GAP + 20)
+    right_y -= (cmp_h + 24)
 
-    # ========== SEKCJA: Parametry wejściowe ==========
-    section_title(c, "Parametry wejściowe", MARGIN_X, y)
-    y -= 18
-    c.setFillColor(ZUS_BLACK); c.setFont(FONT_MAIN, 10)
-    inputs = [
+    # ===== DANE WEJŚCIOWE (lewa) + ZAŁOŻENIA (prawa) – DWIE KOLUMNY =====
+    # Punkt startu sekcji pod wcześniejszymi kolumnami
+    y_after_cols = min(left_y, right_y) - 18
+
+    # Szerokości/pozycje kolumn w tym rzędzie
+    col2_w   = (panel_w - GUTTER) / 2
+    left2_x  = panel_x
+    right2_x = panel_x + col2_w + GUTTER
+
+    # --- Nagłówki obu kolumn
+    section_heading(c, "Dane wejściowe", left2_x, y_after_cols)
+    section_heading(c, "Założenia i parametry", right2_x, y_after_cols)
+
+    # Ustawienia typografii list
+    LINE_H = 12
+    c.setFont(FONT_MAIN, 9)
+    c.setFillColor(ZUS_NAVY)
+
+    # --- LEWA kolumna: Dane wejściowe
+    left_list_y = y_after_cols - 16
+    bullets = [
         f"Wiek: {payload.age}",
         f"Płeć: {payload.sex.upper()}",
-        f"Pensja brutto: {fmt_money(payload.gross_salary)}",
+        f"Pensja brutto (dziś): {fmt_money(payload.gross_salary)}",
         f"Lata pracy: {payload.start_year}–{result['retire_year']}",
         f"Kwartał przyznania: {payload.quarter_award}",
         f"Uwzględniono L4: {'tak' if payload.include_sick_leave else 'nie'}",
-        f"Środki konto/subkonto: {fmt_money((payload.zus_balance.konto if payload.zus_balance else 0.0))} / {fmt_money((payload.zus_balance.subkonto if payload.zus_balance else 0.0))}",
-        f"Oczekiwana emerytura: {fmt_money(payload.expected_pension) if payload.expected_pension is not None else '—'}",
-        f"Kod pocztowy: {payload.postal_code or '—'}"
+        f"Konto/Subkonto: {fmt_money((payload.zus_balance.konto if payload.zus_balance else 0.0))} / "
+            f"{fmt_money((payload.zus_balance.subkonto if payload.zus_balance else 0.0))}",
     ]
-    gs = result.get("goal_seek", {})
-    sl = result.get("sick_leave_impact", {})
-    inputs.extend([
-        f"Oczekiwana vs prognoza: {fmt_money(gs.get('expected'))} vs {fmt_money(result['benefit']['real'])}",
-        f"Brakuje do oczekiwań: {fmt_money(gs.get('target_gap'))}",
-        f"Wpływ L4: {fmt_money(sl.get('loss_abs'))} ({fmt_pct(sl.get('loss_pct'))})",
-        f"Lata potrzebne: {gs.get('extra_years_needed') if gs.get('extra_years_needed') is not None else '>' + str(10)}"
-    ])
-    for line in inputs:
-        y -= LINE_GAP; c.drawString(MARGIN_X, y, "• " + line)
+    if payload.expected_pension:
+        expected = float(payload.expected_pension or 0)
+        prognoza_real = float(result["benefit"]["real"] or 0)  # prognoza: realne dziś (m-c)
+        gap = max(0.0, round(expected - prognoza_real, 2))
 
-    y -= (SECTION_GAP - 6)
-    y -= 20  # dodatkowy odstęp nad tytułem „Scenariusze...”
+        gs = result.get("goal_seek", {}) or {}
+        # jeśli nie osiągamy celu w limicie (MAX_EXTRA=10), pokaż ">10"
+        if gs.get("enabled"):
+            yn = gs.get("extra_years_needed")
+            years_label = ">10" if yn is None else str(int(yn))
+        else:
+            years_label = "—"
 
-    # ========== SEKCJA: Scenariusze ==========
-    section_title(c, "Scenariusze opóźnienia przejścia na emeryturę", MARGIN_X, y)
-    y -= 18  # odstęp między tytułem a listą (jak chciałeś)
-    sc = result.get("scenarios", {})
-    for key in ["+1", "+2", "+5"]:
-        if key in sc:
-            bullet_line(c, MARGIN_X, y, f"{key} rok/lata: +{sc[key]}% do świadczenia nominalnego", ZUS_ORANGE)
-            y -= LINE_GAP
+        bullets.extend([
+            f"Oczekiwana emerytura: {fmt_money(expected)}",
+            f"Oczekiwana vs prognoza: {fmt_money(expected)} vs {fmt_money(prognoza_real)}",
+            f"Brakuje do oczekiwań: {fmt_money(gap)}",
+            f"Lata potrzebne: {years_label}",
+        ])
 
-    # Mała stopka z założeniami/źródłami
+    for line in bullets:
+        c.drawString(left2_x, left_list_y, f"• {line}")
+        left_list_y -= LINE_H
+
+    # --- PRAWA kolumna: Założenia i parametry
+    right_list_y = y_after_cols - 16
+    wg_src = "Mentor (średnia płaca)" if result['assumptions_used']['wage_growth_source']=='mentor_avg_wage' \
+            else "ENV fallback"
+    assumptions_lines = [
+        f"CPI użyte: {fmt_pct((result['assumptions_used']['cpi'] or 0)*100)}",
+        f"Oczek. długość życia: {result['assumptions_used']['life_months']} mies.",
+        f"CAGR płac do przejścia: {fmt_pct((result['assumptions_used']['wage_growth'] or 0)*100)} ({wg_src})",
+        f"Rok przejścia: {result['retire_year']}",
+        f"Średnia emerytura w roku przejścia: {fmt_money(float(result.get('avg_benefit_year') or 0))}",
+        f"RR (dziś): {fmt_pct((result.get('replacement_rate_percent') or 0))}",
+    ]
+    # ▼ DODAJ: jawna informacja o średniej absencji (dni) i wpływie na świadczenie
+    dni_l4 = ASSUMPTIONS.get("absencja_chorobowa", {}).get(payload.sex.upper(), {}).get("dni_rocznie")
+    loss_abs = (result.get("sick_leave_impact", {}) or {}).get("loss_abs")
+    loss_pct = (result.get("sick_leave_impact", {}) or {}).get("loss_pct")
+    if dni_l4 is not None and loss_pct is not None:
+        assumptions_lines.append(
+            f"Absencja: ~{int(dni_l4)} dni/rok; wpływ: {fmt_money(loss_abs)} ({fmt_pct(loss_pct)})"
+        )
+
+    for line in assumptions_lines:
+        c.drawString(right2_x, right_list_y, f"• {line}")
+        right_list_y -= LINE_H
+
+
+    # Stopka
+    c.setFillColor(ZUS_GRAY); c.rect(0, 0, w, 26, fill=1, stroke=0)
     c.setFillColor(ZUS_NAVY); c.setFont(FONT_MAIN, 9)
-    ass = result.get("assumptions_used", {})
-    src = "mentor_avg_wage" if result.get("assumptions_used",{}).get("wage_growth_source","")=="mentor_avg_wage" else "env_fallback"
-    c.drawString(MARGIN_X, 48, f"Założenia: CPI={ass.get('cpi','—'):.4f}, life_months={ass.get('life_months','—')}, wage_growth≈{ass.get('wage_growth','—'):.4f} ({src}).")
-    c.setFont(FONT_MAIN, 8)
-    c.drawString(MARGIN_X, 36, "Źródła: parametry_mentor.xlsx (CPI/avg_wage/waloryzacje), avg_benefit.xlsx (średnia emerytura).")
+    c.drawRightString(w - MARGIN_X, 9, f"Emerytura360 • {dt.date.today().isoformat()}")
 
-    # FOOTER
-    draw_footer(c, w)
+    # --- STRONA 2: Wykresy z /simulate/timeline ---
+    # Zakończ stronę 1 i zacznij nową
+    c.showPage()
 
-    c.showPage(); c.save(); buffer.seek(0)
+    # Nagłówki strony 2
+    w, h = A4
+    panel_x = MARGIN_X
+    panel_w = w - 2 * MARGIN_X
+    c.setFillColor(ZUS_NAVY)
+    c.setFont(FONT_BOLD, 24); c.drawString(panel_x, h - 96, "Jak rośnie Twoja emerytura")
+    c.setFont(FONT_BOLD, 14); c.drawString(panel_x, h - 120, "Podstawa (konto+subkonto+waloryzacje) i świadczenie realne")
+
+    # 1) Pobierz timeline (lokalnie, bez HTTP) i wybierz kilka równych punktów na osi czasu
+    tl = simulate_timeline(payload, format=None).get("timeline", [])
+    if tl:
+        target_points = 8
+        step = max(1, len(tl) // target_points)
+        sample = [tl[i] for i in range(0, len(tl), step)]
+        if sample[-1]["year"] != tl[-1]["year"]:
+            sample.append(tl[-1])
+
+        labels = [str(r["year"]) for r in sample]
+        values_base = [float(r["base_after_indexation"]) for r in sample]
+        values_real = [float(r["benefit_if_retire_in_year"]["real"]) for r in sample]
+
+        chart_w = panel_w
+        chart_h = 160
+        x = panel_x
+        y_top = h - 170
+
+        # a) Baza po waloryzacjach
+        c.setFont(FONT_BOLD, 12); c.setFillColor(ZUS_NAVY)
+        c.drawString(x, y_top, "Podstawa po waloryzacjach (koniec roku)")
+        draw_simple_bar_chart(
+            c,
+            x=x,
+            y=y_top - (chart_h + 8),
+            w=chart_w,
+            h=chart_h,
+            labels=labels,
+            values=values_base,
+            colors_fill=[ZUS_BLUE] * len(values_base)
+        )
+
+        # b) Świadczenie realne (m-c)
+        y2 = y_top - (chart_h + 8) - 40 - chart_h
+        c.setFont(FONT_BOLD, 12); c.setFillColor(ZUS_NAVY)
+        c.drawString(x, y2 + chart_h + 8, "Prognozowane świadczenie REAL (m-c) – punktowo po latach")
+        draw_simple_bar_chart(
+            c,
+            x=x,
+            y=y2,
+            w=chart_w,
+            h=chart_h,
+            labels=labels,
+            values=values_real,
+            colors_fill=[ZUS_GREEN] * len(values_real)
+        )
+
+        c.setFont(FONT_MAIN, 9); c.setFillColor(ZUS_NAVY)
+        c.drawString(x, y2 - 18, "Kwoty w PLN (miesięcznie)")
+    else:
+        c.setFont(FONT_BOLD, 14); c.setFillColor(ZUS_RED)
+        c.drawString(panel_x, h - 160, "Brak danych do wykresu timeline.")
+
+    # Stopka strony 2
+    c.setFillColor(ZUS_GRAY); c.rect(0, 0, w, 26, fill=1, stroke=0)
+    c.setFillColor(ZUS_NAVY); c.setFont(FONT_MAIN, 9)
+    c.drawRightString(w - MARGIN_X, 9, f"Emerytura360 • {dt.date.today().isoformat()}")
+
+
+    c.save(); buffer.seek(0)
     return StreamingResponse(
         buffer,
         media_type="application/pdf",
