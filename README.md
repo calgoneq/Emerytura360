@@ -8,8 +8,6 @@ Liczy świadczenie (nominalne i realne), pokazuje wpływ L4, porównuje do śred
 
 ---
 
-<video src="https://github.com/calgoneq/Emerytura360/blob/main/Emerytura%20360.mp4" width="800" controls></video>
-
 ## Spis treści
 
 - [Architektura](#architektura)
