@@ -1,4 +1,4 @@
-# Eme360 — symulator emerytalny (FastAPI + Next.js)
+# Emerytura360 — symulator emerytalny (FastAPI + Next.js)
 
 **Edukacyjny** symulator emerytury.  
 Liczy świadczenie (nominalne i realne), pokazuje wpływ L4, porównuje do średniej, generuje PDF, zwraca timeline i warianty „what‑if”. Frontend zapewnia responsywny UI z wykresami.
@@ -121,7 +121,7 @@ Plik `.env.local` w katalogu frontu:
 ```env
 NEXT_PUBLIC_API_BASE=http://localhost:8000
 # Opcjonalnie:
-NEXT_PUBLIC_APP_NAME=Eme360
+NEXT_PUBLIC_APP_NAME=Emerytura360
 NEXT_PUBLIC_DEFAULT_LANG=pl
 ```
 
