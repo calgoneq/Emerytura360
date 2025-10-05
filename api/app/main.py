@@ -7,30 +7,25 @@ from fastapi.responses import StreamingResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic.config import ConfigDict
 
-# stdlib / io
 import os
 import io
 import csv
 import copy
 
-# ReportLab
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib import colors
 
-# XLSX
 import openpyxl
 
-# local calc engine
 from .calculations.engine import (
     efekt_absencji_factor, waloryzuj_rocznie, waloryzuj_kwartalnie_po_31_stycznia,
     annuitetyzuj, urealnij
 )
 from .calculations.waloryzacja import A as ASSUMPTIONS
 
-# --- optional .env ---
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -52,20 +47,19 @@ ZUS_BLUE   = colors.Color(63/255, 132/255, 210/255)
 ZUS_NAVY   = colors.Color(0/255, 65/255, 110/255)
 ZUS_RED    = colors.Color(240/255, 94/255, 94/255)
 ZUS_BLACK  = colors.black
-ZUS_LIGHT_BG = colors.Color(246/255, 248/255, 251/255)  # delikatne tło sekcji
+ZUS_LIGHT_BG = colors.Color(246/255, 248/255, 251/255)
 
-# Dodatkowe akcenty do „annual report”
 ACCENT_YELLOW = colors.Color(255/255, 203/255, 0/255)
 ACCENT_TEAL   = colors.Color(0/255, 185/255, 185/255)
 
 # --- Layout constants for PDF ---
-MARGIN_X = 32        # lewy/prawy margines strony
-MARGIN_TOP = 78      # górny margines (dla startu treści)
-SECTION_GAP = 22     # odstęp pionowy między sekcjami
-LINE_GAP = 14        # odstęp między linijkami tekstu
+MARGIN_X = 32       
+MARGIN_TOP = 78      
+SECTION_GAP = 22     
+LINE_GAP = 14        
 
 # --- Typography (CSS-like font stack dla ReportLab) ---
-FONT_MAIN = "Helvetica"          # ostateczny fallback (Type1)
+FONT_MAIN = "Helvetica"          
 FONT_BOLD = "Helvetica-Bold"
 
 def _register_polish_fonts():
@@ -82,19 +76,18 @@ def _register_polish_fonts():
 
     # 1) Kolejność preferencji (nazwa logiczna, lista wzorców plików Regular, Bold)
     PREFERRED = [
-        ("SFPro",              # -apple-system / system-ui na macOS
+        ("SFPro",              
          ["SFProText-Regular.otf", "SFUIText-Regular.otf", "SFNS.ttf"],
          ["SFProText-Bold.otf", "SFUIText-Bold.otf", "SFNS-Bold.ttf"]),
-        ("SegoeUI",            # Windows (Segoe UI)
+        ("SegoeUI",            
          ["segoeui.ttf", "Segoe UI.ttf"],
          ["segoeuib.ttf", "Segoe UI Bold.ttf"]),
-        ("Roboto",             # Android / web
+        ("Roboto",            
          ["Roboto-Regular.ttf"],
          ["Roboto-Bold.ttf"]),
         ("Arial",
          ["Arial.ttf", "arial.ttf"],
          ["Arial Bold.ttf", "arialbd.ttf"]),
-        # Bardzo dobry fallback z pełnymi znakami PL (dołącz jeśli chcesz)
         ("DejaVuSans",
          ["DejaVuSans.ttf"],
          ["DejaVuSans-Bold.ttf"]),
@@ -102,10 +95,10 @@ def _register_polish_fonts():
 
     # 2) Gdzie szukać plików
     search_dirs = [
-        str(FONTS_DIR),                         # ./fonts w projekcie
-        "/System/Library/Fonts", "/Library/Fonts",                       # macOS
-        "C:/Windows/Fonts",                                                         # Windows
-        "/usr/share/fonts", "/usr/local/share/fonts", "~/.local/share/fonts", "~/.fonts"  # Linux
+        str(FONTS_DIR),                        
+        "/System/Library/Fonts", "/Library/Fonts",                      
+        "C:/Windows/Fonts",                                                         
+        "/usr/share/fonts", "/usr/local/share/fonts", "~/.local/share/fonts", "~/.fonts"  
     ]
     search_dirs = [os.path.expanduser(d) for d in search_dirs if os.path.isdir(os.path.expanduser(d))]
 
@@ -136,8 +129,6 @@ def _register_polish_fonts():
             FONT_MAIN = alias
             FONT_BOLD = alias + "-Bold"
             break
-    # jeśli nic nie znaleziono, zostaje Helvetica/Helvetica-Bold
-    # (wtedy diakrytyki PL mogą być gorsze – najlepiej wrzuć Roboto/DejaVu do ./fonts)
 
 _register_polish_fonts()
 
@@ -189,7 +180,7 @@ class SimInput(BaseModel):
     quarter_award: int = Field(3, ge=1, le=4)
     zus_balance: Optional[Balance] = None
     custom_wage_timeline: Optional[Dict[int, float]] = None
-    custom_sick_days: Optional[Dict[int, float]] = None  # ⬅️ DODAJ TO
+    custom_sick_days: Optional[Dict[int, float]] = None  
     expected_pension: Optional[float] = None
     postal_code: Optional[str] = None
 
@@ -248,7 +239,7 @@ def load_params_table():
 
         c_year = _find_col(headers, "rok")
         c_cpi  = _find_col(headers, "wskaźnik cen towarów i usług")
-        c_rw   = _find_col(headers, "realnego wzrostu przeciętn")  # real wage
+        c_rw   = _find_col(headers, "realnego wzrostu przeciętn")
         c_avg  = _find_col(headers, "przeciętne miesięczne wynagrodzenie")
         c_wk   = _find_col(headers, "waloryzacji", "na koncie")
         c_ws   = _find_col(headers, "waloryzacji", "na subkoncie")
@@ -269,14 +260,13 @@ def load_params_table():
             wal_sub   = _to_float(ws.cell(r, c_ws).value) if c_ws else None
 
             PARAMS[y] = {
-                "cpi_index": cpi_idx,           # np. 1.036 -> CPI=3.6%
-                "real_wage_index": real_wage,   # np. 1.0202
-                "avg_wage": avg_wage,           # PLN/m-c
-                "wal_konto": wal_konto,         # np. 114.41% -> 114.41
-                "wal_sub": wal_sub,             # np. 109.83% -> 109.83
+                "cpi_index": cpi_idx,         
+                "real_wage_index": real_wage,  
+                "avg_wage": avg_wage,           
+                "wal_konto": wal_konto,        
+                "wal_sub": wal_sub,          
             }
     except Exception:
-        # nie psuj uruchomienia, po prostu zostaw pusty PARAMS
         pass
 
 load_params_table()
@@ -313,7 +303,6 @@ def load_avg_benefit_table():
 
 load_avg_benefit_table()
 
-# DEMO mode (np. DEMO=1 w .env)
 DEMO = os.getenv("DEMO", "0") == "1"
 
 def _seed_avg_if_missing():
@@ -321,10 +310,8 @@ def _seed_avg_if_missing():
     if not AVG_TABLE:
         base = 3800.0
         for y in range(dt.date.today().year, dt.date.today().year + 10):
-            # prosty trend 3% rocznie
             AVG_TABLE[y] = base * (1.03 ** (y - dt.date.today().year))
 
-# W trybie demo zawsze dosiej średnią, jeśli brak
 if DEMO:
     _seed_avg_if_missing()
 
@@ -364,7 +351,6 @@ def _avg_growth_rate_from_tail(data: Dict[int, float], k: int = 5) -> float:
     return sum(rates) / len(rates) if rates else _fallback_growth()
 
 def expected_life_months(sex: str, retire_year: int) -> int:
-    # TODO: tablice GUS / e_x
     return 240
 
 def absencja_days(sex: str) -> Optional[float]:
@@ -473,10 +459,10 @@ def buckets_for_year(year: int):
     return {"year": year, "avg_source": "AVG_TABLE/ASSUMPTIONS/DEMO", "buckets": out}
 
 # --- Extra layout knobs (hackathon tuning) ---
-KPI_CARD_H = 64     # wysokość małych kart KPI
-KPI_GAP    = 18     # odstęp między kartami KPI
-COMPARE_H  = 90     # wysokość boxa "Porównanie ze średnią"
-NEG_GAP    = 80     # "negatywny" odstęp NAD boxem porównania (dodatnia wartość = podnosi box w górę)
+KPI_CARD_H = 64     
+KPI_GAP    = 18     
+COMPARE_H  = 90     
+NEG_GAP    = 80     
 
 # --- PDF helpers (stare; część zostaje, część poniżej nowa wersja) ---
 def draw_header(c: canvas.Canvas, w, h, title: str):
@@ -550,7 +536,6 @@ def comparison_numbers(c: canvas.Canvas, x, y, w,
     c.setFillColor(colors.white); c.setStrokeColor(ZUS_GRAY)
     c.roundRect(x, y, w, box_h, 10, fill=1, stroke=1)
 
-    # ★ Pozycje – środek boxa
     left_x   = x + w * 0.25
     center_x = x + w * 0.50
     right_x  = x + w * 0.75
@@ -559,23 +544,20 @@ def comparison_numbers(c: canvas.Canvas, x, y, w,
     LABEL_FS = 9
     VALUE_FS_LEFT  = 14
     VALUE_FS_RIGHT = 14
-    LABEL_OFFSET = 10   # ile nad środkiem
-    VALUE_OFFSET = 12   # ile pod środkiem
+    LABEL_OFFSET = 10  
+    VALUE_OFFSET = 12 
 
-    # Lewa kolumna (Twoja)
     c.setFillColor(ZUS_NAVY); c.setFont(FONT_MAIN, LABEL_FS)
     c.drawCentredString(left_x,  mid_y + LABEL_OFFSET, "Twoja (nominalna, m-c)")
     c.setFillColor(ZUS_BLACK); c.setFont(FONT_BOLD, VALUE_FS_LEFT)
     c.drawCentredString(left_x,  mid_y - VALUE_OFFSET, fmt_money(my_value))
 
-    # Prawa kolumna (Średnia)
     if not avg_value or avg_value <= 0: avg_value = 0.0
     c.setFillColor(ZUS_NAVY); c.setFont(FONT_MAIN, LABEL_FS)
     c.drawCentredString(right_x, mid_y + LABEL_OFFSET, "Średnia")
     c.setFillColor(ZUS_BLACK); c.setFont(FONT_BOLD, VALUE_FS_RIGHT)
     c.drawCentredString(right_x, mid_y - VALUE_OFFSET, fmt_money(avg_value))
 
-    # Badge ze środkiem w boxie
     diff_pct = None
     if avg_value > 0 and my_value is not None:
         diff_pct = (my_value - avg_value) / avg_value * 100.0
@@ -587,21 +569,19 @@ def comparison_numbers(c: canvas.Canvas, x, y, w,
 
     pill_w, pill_h = 50, 16
     pill_x = center_x - pill_w/2
-    pill_y = mid_y - pill_h/2 - 20  # ★ idealne wycentrowanie
+    pill_y = mid_y - pill_h/2 - 20  
     c.setFillColor(badge_color); c.setStrokeColor(colors.white); c.setLineWidth(1.2)
     c.roundRect(pill_x, pill_y, pill_w, pill_h, 7, fill=1, stroke=1)
     c.setFillColor(colors.white); c.setFont(FONT_BOLD, 10)
     c.drawCentredString(center_x, pill_y + pill_h/2 - 3, badge_text)
 
 def fmt_money_pl_short(v: float) -> str:
-    # skrót „mln/tys.” + polskie separatory
     if v >= 2_000_000:
         s = f"{v/1_000_000:.1f}".replace(".", ",")
         return f"{s} mln zł"
     if v >= 20_000:
-        s = str(int(round(v/1000)))  # tysiące bez dziesiętnych
+        s = str(int(round(v/1000)))  
         return f"{s} tys. zł"
-    # format z miejscami dziesiętnymi: spacje tysięcy, przecinek dziesiętnych
     s = f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", " ")
     return f"{s} zł"
 
@@ -612,12 +592,10 @@ def draw_simple_bar_chart(c: canvas.Canvas, x, y, w, h, labels, values, colors_f
         return
     max_v = max(values) if max(values) > 0 else 1.0
 
-    # ramka
     c.setFillColor(colors.white)
     c.setStrokeColor(ZUS_GRAY)
     c.roundRect(x, y, w, h, 10, fill=1, stroke=1)
 
-    # marginesy wewnętrzne (trochę większy top na etykiety)
     pad_x = 24
     pad_top = 32
     pad_bottom = 34
@@ -626,12 +604,10 @@ def draw_simple_bar_chart(c: canvas.Canvas, x, y, w, h, labels, values, colors_f
     chart_y = y + pad_bottom
     chart_h = h - pad_top - pad_bottom
 
-    # oś
     c.setStrokeColor(ZUS_GRAY)
     c.setLineWidth(0.6)
     c.line(chart_x, chart_y, chart_x + chart_w, chart_y)
 
-    # rozstaw słupków
     gap = chart_w * 0.12 / max(1, n)
     bar_w = (chart_w - gap * (n + 1)) / n
 
@@ -640,7 +616,6 @@ def draw_simple_bar_chart(c: canvas.Canvas, x, y, w, h, labels, values, colors_f
         bx = chart_x + gap + i * (bar_w + gap)
         by = chart_y
 
-        # kolor
         if colors_fill and i < len(colors_fill):
             c.setFillColor(colors_fill[i])
         else:
@@ -651,22 +626,17 @@ def draw_simple_bar_chart(c: canvas.Canvas, x, y, w, h, labels, values, colors_f
         # --- Etykieta wartości (PL, skróty) ---
         label = fmt_money_pl_short(v)
 
-        # Dopuszczamy minimalny rozmiar 6 pt.
-        # Dodatkowo pozwalamy napisie „wystawać” maksymalnie do połowy szczeliny (gap),
-        # żeby uniknąć cięcia na „…”, ale też nie wpadać na sąsiedni słupek.
         value_fs = 8
         max_label_width = bar_w + gap * 0.5
         while c.stringWidth(label, FONT_BOLD, value_fs) > max_label_width and value_fs > 6:
             value_fs -= 1
 
-        # Jedna, stała wysokość dla wszystkich etykiet nad słupkiem
         val_y = min(by + bh + 12, y + h - 10)
 
         c.setFillColor(ZUS_BLACK)
         c.setFont(FONT_BOLD, value_fs)
         c.drawCentredString(bx + bar_w/2, val_y, label)
 
-        # --- Oś X (co 1, ale będzie miejsce dzięki większym odstępom i rotacji powyżej) ---
         c.setFillColor(ZUS_NAVY)
         c.setFont(FONT_MAIN, 9)
         c.drawCentredString(bx + bar_w/2, y + 6, labels[i])
@@ -676,7 +646,7 @@ def bullet_line(c: canvas.Canvas, x, y, text, color=ZUS_GREEN):
     c.setFillColor(ZUS_NAVY); c.setFont(FONT_MAIN, 10)
     c.drawString(x+10, y, text)
 
-# ======== NOWE HELPERY do layoutu „annual report” (prawa szpalta + donuty) ========
+# ======== HELPERY do layoutu „annual report” (prawa szpalta + donuty) ========
 
 def draw_right_panel_bg(c: canvas.Canvas, w, h):
     """Prawa połowa w kolorze ZUS_NAVY."""
@@ -692,7 +662,7 @@ def donut(c: canvas.Canvas, cx, cy, r_outer, r_inner, segments, labels=None,
     segments = [(fraction_0to1, color, optional_label)]
     """
     total = sum(s[0] for s in segments) or 1.0
-    angle0 = 90.0  # start od góry
+    angle0 = 90.0
     for frac, color_, *_ in segments:
         sweep = 360.0 * (frac/total)
         c.setFillColor(color_); c.setStrokeColor(color_)
@@ -701,7 +671,6 @@ def donut(c: canvas.Canvas, cx, cy, r_outer, r_inner, segments, labels=None,
     c.setFillColor(colors.white)
     c.circle(cx, cy, r_inner, fill=1, stroke=0)
 
-    # legenda
     if legend_x is not None and labels:
         c.setFont(FONT_MAIN, 8)
         for i, ((frac, color_, *_), lab) in enumerate(zip(segments, labels)):
@@ -718,7 +687,6 @@ def rr_gauge(c: canvas.Canvas, cx: float, cy: float, r_outer: float, r_inner: fl
     """
     rr = max(0.0, min(1.0, rr_frac))
 
-    # wypełnienie
     c.setFillColor(ZUS_ORANGE)
     c.wedge(cx - r_outer, cy - r_outer, cx + r_outer, cy + r_outer,
             90, 90 + 360 * rr, stroke=0, fill=1)
@@ -726,11 +694,9 @@ def rr_gauge(c: canvas.Canvas, cx: float, cy: float, r_outer: float, r_inner: fl
     c.wedge(cx - r_outer, cy - r_outer, cx + r_outer, cy + r_outer,
             90 + 360 * rr, 450, stroke=0, fill=1)
 
-    # dziura w środku (pierścień)
     c.setFillColor(colors.white)
     c.circle(cx, cy, r_inner, fill=1, stroke=0)
 
-    # tytuł + wartość w środku
     c.setFillColor(colors.white); c.setFont(FONT_BOLD, 18)
     c.drawString(cx - r_outer, cy + r_outer + 22, title)
 
@@ -783,7 +749,6 @@ def simulate(payload: SimInput):
     current_year = today.year
     retire_year = payload.retire_year or (today.year + max(0, statutory_retire_age(payload.sex) - payload.age))
 
-    # Walidacje wejścia (przyjazne 400)
     if payload.start_year >= (payload.retire_year or retire_year):
         raise HTTPException(status_code=400, detail="start_year musi być < retire_year")
 
@@ -792,7 +757,7 @@ def simulate(payload: SimInput):
         if bad:
             raise HTTPException(status_code=400, detail=f"custom_wage_timeline zawiera niepoprawne wartości dla lat: {bad}")
 
-    # === 1) ŚCIEŻKA PŁAC: najpierw spróbuj z arkusza mentorów (PARAMS.avg_wage), potem fallback ===
+    # === 1) ŚCIEŻKA PŁAC ===
     def _closest_year(d: Dict[int, dict], target: int) -> Optional[int]:
         if not d:
             return None
@@ -823,33 +788,33 @@ def simulate(payload: SimInput):
         else:
             wages = payload.custom_wage_timeline or {y: payload.gross_salary for y in range(payload.start_year, retire_year)}
 
-    # 1.1. L4 per rok (opcjonalne)
+    # 1.1. L4 per rok
     def l4_factor_for_year(y: int) -> float:
         if payload.custom_sick_days and y in payload.custom_sick_days:
             return efekt_absencji_factor(payload.custom_sick_days[y])
         return efekt_absencji_factor(absencja_days(payload.sex)) if payload.include_sick_leave else 1.0
 
-    # 1.2. Limit 250% przeciętnego wynagrodzenia (miesięczny cap – możesz zostawić lub wyłączyć)
+    # 1.2. Limit 250% przeciętnego wynagrodzenia
     def _cap_base_monthly(y: int, base: float) -> float:
         avg = PARAMS.get(y, {}).get("avg_wage")
         if avg:
             return min(base, 2.5 * avg)
         return base
 
-    # 1.3. Limit 30× prognozowanej średniej (roczny cap – NOWE)
+    # 1.3. Limit 30× prognozowanej średniej 
     def annual_base_with_30x_cap(y: int, monthly_base_after_cap: float) -> float:
-        avg = PARAMS.get(y, {}).get("avg_wage")  # prognozowana średnia miesięczna
+        avg = PARAMS.get(y, {}).get("avg_wage")  
         annual_base = 12.0 * float(monthly_base_after_cap)
         if avg:
-            annual_cap = 30.0 * float(avg)  # 30-krotność miesięcznej średniej = limit roczny
+            annual_cap = 30.0 * float(avg)  
             return min(annual_base, annual_cap)
         return annual_base
 
     # === 2) Składki roczne po L4 + limitach (250% m-c + 30× rocznie) ===
     skladki_po_latach: Dict[int, float] = {}
     for rok, wyn in wages.items():
-        monthly_base = _cap_base_monthly(rok, wyn)             # cap 2.5× m-c (opcjonalny)
-        annual_base = annual_base_with_30x_cap(rok, monthly_base)  # cap 30× rocznie
+        monthly_base = _cap_base_monthly(rok, wyn)            
+        annual_base = annual_base_with_30x_cap(rok, monthly_base) 
         skladki_po_latach[rok] = annual_base * 0.1952 * l4_factor_for_year(rok)
 
     # === 3) Waloryzacje i podstawa ===
@@ -865,7 +830,7 @@ def simulate(payload: SimInput):
     subkonto = (payload.zus_balance.subkonto if payload.zus_balance else 0.0) or 0.0
     podstawa = po_kwartale + konto + subkonto
 
-    # === 4) Annuitetyzacja i urealnienie (CPI z PARAMS jeśli jest) ===
+    # === 4) Annuitetyzacja i urealnienie ===
     months = expected_life_months(payload.sex, retire_year)
     benefit_nominal = annuitetyzuj(podstawa, months)
 
@@ -882,12 +847,11 @@ def simulate(payload: SimInput):
         indexed_wage_at_retirement = float(payload.gross_salary) * (
             PARAMS[retire_year]["avg_wage"] / PARAMS[current_year]["avg_wage"]
         )
-        wg_used = None  # ścieżka z PARAMS
+        wg_used = None 
     else:
         wg_used = wage_growth_rate()
         indexed_wage_at_retirement = float(payload.gross_salary) * ((1.0 + wg_used) ** years_to_retire)
 
-    # efektywny CAGR płac (do raportu)
     if wg_used is None:
         if years_to_retire > 0:
             wg_effective = (PARAMS[retire_year]["avg_wage"] / PARAMS[current_year]["avg_wage"]) ** (1.0 / years_to_retire) - 1.0
@@ -901,11 +865,11 @@ def simulate(payload: SimInput):
         if indexed_wage_at_retirement > 0 else None
     )
 
-    # === 6) Średnia emerytura i stopa zastąpienia (dzisiejsza) ===
+    # === 6) Średnia emerytura i stopa zastąpienia ===
     avg_benefit = avg_benefit_for_year(retire_year)
     replacement = compute_replacement_rate(benefit_real, payload.gross_salary)
 
-    # === 7) Referencja: ile byłoby BEZ L4 (komunikat o wpływie absencji) — z tym samym limitem 30× ===
+    # === 7) Referencja: ile byłoby BEZ L4 ===
     def _wages_for_range(end_year: int) -> Dict[int, float]:
         if PARAMS and all(PARAMS.get(y, {}).get("avg_wage") for y in range(payload.start_year, end_year)):
             ref_y = _closest_year(PARAMS, current_year) or current_year
@@ -1002,7 +966,6 @@ def simulate(payload: SimInput):
         "data_sources": {"mentor_params": used_params_path, "avg_benefits_file": bool(AVG_TABLE)}
     }
 
-    # --- log ---
     log_usage(payload, result)
     return result
 
@@ -1022,7 +985,6 @@ def simulate_timeline(payload: SimInput, format: Optional[str] = Query(None)):
     end_y = payload.retire_year or default_retire_year
     retire_year = payload.retire_year or default_retire_year
 
-    # Walidacje wejścia (przyjazne 400)
     if payload.start_year >= (payload.retire_year or retire_year):
         raise HTTPException(status_code=400, detail="start_year musi być < retire_year")
 
@@ -1031,7 +993,6 @@ def simulate_timeline(payload: SimInput, format: Optional[str] = Query(None)):
         if bad:
             raise HTTPException(status_code=400, detail=f"custom_wage_timeline zawiera niepoprawne wartości dla lat: {bad}")
 
-    # 1) Ścieżka płac jak w simulate: PARAMS -> fallback
     def _closest_year(d: Dict[int, dict], target: int) -> Optional[int]:
         if not d:
             return None
@@ -1059,20 +1020,17 @@ def simulate_timeline(payload: SimInput, format: Optional[str] = Query(None)):
         else:
             wages = payload.custom_wage_timeline or {y: payload.gross_salary for y in range(start_y, end_y)}
 
-    # 2) L4 per rok
     def l4_factor_for_year(y: int) -> float:
         if payload.custom_sick_days and y in payload.custom_sick_days:
             return efekt_absencji_factor(payload.custom_sick_days[y])
         return efekt_absencji_factor(absencja_days(payload.sex)) if payload.include_sick_leave else 1.0
 
-    # 3) Limit 250% przeciętnego wynagrodzenia (miesięczny cap – opcjonalny)
     def _cap_base_monthly(y: int, base: float) -> float:
         avg = PARAMS.get(y, {}).get("avg_wage")
         if avg:
             return min(base, 2.5 * avg)
         return base
 
-    # 3b) Limit 30× prognozowanej średniej (roczny cap – NOWE)
     def annual_base_with_30x_cap(y: int, monthly_base_after_cap: float) -> float:
         avg = PARAMS.get(y, {}).get("avg_wage")
         annual_base = 12.0 * float(monthly_base_after_cap)
@@ -1081,14 +1039,13 @@ def simulate_timeline(payload: SimInput, format: Optional[str] = Query(None)):
             return min(annual_base, annual_cap)
         return annual_base
 
-    # 4) CPI dla urealnienia (z PARAMS jeżeli jest)
     if PARAMS.get(today.year, {}).get("cpi_index"):
         cpi = max(0.0, (PARAMS[today.year]["cpi_index"] - 1.0))
     else:
         cpi = float(os.getenv("CPI", "0.03"))
 
     out: List[Dict] = []
-    base_running = 0.0  # skumulowana baza po WALORYZACJI ROCZNEJ do końca danego roku
+    base_running = 0.0  
 
     for y in range(start_y, end_y):
         wage_y = wages.get(y, payload.gross_salary)
@@ -1147,7 +1104,6 @@ def simulate_what_if(
     Zwraca zestaw scenariuszy dla różnych opóźnień przejścia (0,1,2,5 lat).
     Bazuje na /simulate – więc używa arkusza mentorów, limitu 250% itd.
     """
-    # baseline
     base = simulate(payload)
     out = []
     for d in delays:
@@ -1164,7 +1120,6 @@ def simulate_what_if(
             "assumptions_used": sim_d["assumptions_used"]
         })
 
-    # różnice vs baseline (dla wygody frontu)
     for row in out:
         row["delta_vs_baseline"] = {
             "benefit_actual": round(row["benefit"]["actual"] - base["benefit"]["actual"], 2),
@@ -1187,7 +1142,6 @@ def simulate_explain(payload: SimInput):
     Zwraca breakdown: składki roczne (po L4 i limicie), suma po waloryzacji rocznej,
     baza po waloryzacji kwartalnej, annuitetyzację i urealnienie.
     """
-    # powtórzenie kluczowych fragmentów z /simulate (lokalnie, bez loga do CSV)
     today = dt.date.today()
     current_year = today.year
     retire_year = payload.retire_year or (today.year + max(0, statutory_retire_age(payload.sex) - payload.age))
@@ -1197,7 +1151,6 @@ def simulate_explain(payload: SimInput):
         le = [k for k in d.keys() if k <= target]
         return max(le) if le else min(d.keys())
 
-    # ścieżka płac (PARAMS -> fallback)
     wages: Dict[int, float] = {}
     ref_y = _closest_year(PARAMS, current_year) if PARAMS else None
     if not payload.custom_wage_timeline and PARAMS and ref_y and all(PARAMS.get(y,{}).get("avg_wage") for y in range(payload.start_year, retire_year)):
@@ -1223,7 +1176,6 @@ def simulate_explain(payload: SimInput):
         avg = PARAMS.get(y, {}).get("avg_wage")
         return min(base, 2.5 * avg) if avg else base
 
-    # 1) składki per rok (po L4 i limicie)
     skladki_po_latach = {}
     per_year = []
     for rok, wyn in wages.items():
@@ -1233,17 +1185,14 @@ def simulate_explain(payload: SimInput):
         skladki_po_latach[rok] = contr
         per_year.append({"year": rok, "wage": round(wyn,2), "base_after_cap": round(base_y,2), "l4_factor": round(l4f,4), "contribution": round(contr,2)})
 
-    # 2) waloryzacja roczna (sumarycznie)
     rocznie = waloryzuj_rocznie(skladki_po_latach)
     if isinstance(rocznie, dict):
         base_after_annual = float(sum(rocznie.values()))
     else:
         base_after_annual = float(rocznie)
 
-    # 3) waloryzacja kwartalna do roku przejścia
     base_after_quarter = waloryzuj_kwartalnie_po_31_stycznia(retire_year, payload.quarter_award, base_after_annual)
 
-    # 4) podstawa + annuitetyzacja + urealnienie
     konto = (payload.zus_balance.konto if payload.zus_balance else 0.0) or 0.0
     subkonto = (payload.zus_balance.subkonto if payload.zus_balance else 0.0) or 0.0
     podstawa = base_after_quarter + konto + subkonto
@@ -1280,7 +1229,6 @@ def get_buckets(year: Optional[int] = None):
     y = year or dt.date.today().year
     return buckets_for_year(y)
 
-# ---------- PODMIANA LAYOUTU PDF pod TYM SAMYM endpointem /report/pdf ----------
 @app.post(
     "/report/pdf",
     responses={200: {"content": {"application/pdf": {"schema": {"type":"string","format":"binary"}}},
@@ -1295,17 +1243,14 @@ def report_pdf(payload: SimInput = Body(...)):
     c.setTitle(pdf_name)
     w, h = A4
 
-    # --- PANEL: pełna szerokość (z marginesami) ---
     panel_x = MARGIN_X
     panel_w = w - 2 * MARGIN_X
 
-    # Tytuł
     title_y = h - 96
     c.setFillColor(ZUS_NAVY)
     c.setFont(FONT_BOLD, 30); c.drawString(panel_x, title_y, "Raport 2025")
     c.setFont(FONT_BOLD, 22); c.drawString(panel_x, title_y - 28, "Prognoza Emerytury")
 
-    # KPI (2 kolumny nad całą stroną)
     y = title_y - 70
     kpi_gap = 64
     kpi_left_x  = panel_x
@@ -1320,32 +1265,27 @@ def report_pdf(payload: SimInput = Body(...)):
     c.drawString(kpi_left_x,  y, fmt_money(result['benefit']['actual']))
     c.drawString(kpi_right_x, y, fmt_money(result['benefit']['real']))
 
-    # --- Dwie kolumny treści głównej ---
     GUTTER = 28
     col_w = (panel_w - GUTTER) / 2
     left_x  = panel_x
     right_x = panel_x + col_w + GUTTER
 
-    # Stałe odstępy
     HEADING_GAP   = 36
     SECTION_GAP_Y = 16
     BAR_SPACING   = 34
 
-    # Start kolumn pod KPI
     left_y  = y - HEADING_GAP
     right_y = y - HEADING_GAP
 
-    # ===== LEWA KOLUMNA: „Najważniejsze wskaźniki” (4 paski) =====
+    # ===== LEWA KOLUMNA: „Najważniejsze wskaźniki”  =====
     section_heading(c, "Najważniejsze wskaźniki", left_x, left_y)
     left_y -= SECTION_GAP_Y + 16
 
-    # 1) Utrata z L4
     imp = result.get("sick_leave_impact", {})
     loss_pct = max(0.0, min(1.0, (imp.get("loss_pct") or 0) / 100.0))
     stat_bar(c, left_x, left_y, col_w, loss_pct, "Utrata z L4 (proc.)", ZUS_ORANGE)
     left_y -= BAR_SPACING
 
-    # 2) Progres vs oczekiwania
     gs = result.get("goal_seek", {})
     tgt = float(gs.get("expected") or 0)
     prog = float(result['benefit']['real'] or 0)
@@ -1353,52 +1293,43 @@ def report_pdf(payload: SimInput = Body(...)):
     stat_bar(c, left_x, left_y, col_w, pct_goal, "Progres względem oczekiwań", ZUS_GREEN)
     left_y -= BAR_SPACING
 
-    # 3) Twoja nominalna vs średnia
     avg_nom = float(result.get("avg_benefit_year") or 0)
     pct_vs_avg = 0 if avg_nom <= 0 else max(0.0, min(1.0, float(result['benefit']['actual']) / avg_nom))
     stat_bar(c, left_x, left_y, col_w, pct_vs_avg, "Twoja nominalna vs średnia", ZUS_BLUE)
     left_y -= BAR_SPACING
 
-    # 4) RR – stopa zastąpienia
     rr_pct = max(0.0, min(1.0, (result.get("replacement_rate_percent") or 0) / 100.0))
     stat_bar(c, left_x, left_y, col_w, rr_pct, "Stopa zastąpienia (RR)", ACCENT_TEAL)
     left_y -= (BAR_SPACING + 6)
 
-    # ===== PRAWA KOLUMNA: Porównanie + Założenia =====
+    # ===== PRAWA KOLUMNA ====
     section_heading(c, "Porównanie ze średnią", right_x, right_y)
     right_y -= (SECTION_GAP_Y + 4)
 
-    # Box z liczbami (stała wysokość 65)
     cmp_h = 65
     comparison_numbers(
         c,
         x=right_x,
-        y=right_y - cmp_h,  # y w tej funkcji to dolna krawędź
+        y=right_y - cmp_h,
         w=col_w,
         my_value=float(result["benefit"]["actual"]),
         avg_value=avg_nom,
     )
     right_y -= (cmp_h + 24)
 
-    # ===== DANE WEJŚCIOWE (lewa) + ZAŁOŻENIA (prawa) – DWIE KOLUMNY =====
-    # Punkt startu sekcji pod wcześniejszymi kolumnami
     y_after_cols = min(left_y, right_y) - 18
 
-    # Szerokości/pozycje kolumn w tym rzędzie
     col2_w   = (panel_w - GUTTER) / 2
     left2_x  = panel_x
     right2_x = panel_x + col2_w + GUTTER
 
-    # --- Nagłówki obu kolumn
     section_heading(c, "Dane wejściowe", left2_x, y_after_cols)
     section_heading(c, "Założenia i parametry", right2_x, y_after_cols)
 
-    # Ustawienia typografii list
     LINE_H = 12
     c.setFont(FONT_MAIN, 9)
     c.setFillColor(ZUS_NAVY)
 
-    # --- LEWA kolumna: Dane wejściowe
     left_list_y = y_after_cols - 16
     bullets = [
         f"Wiek: {payload.age}",
@@ -1412,11 +1343,10 @@ def report_pdf(payload: SimInput = Body(...)):
     ]
     if payload.expected_pension:
         expected = float(payload.expected_pension or 0)
-        prognoza_real = float(result["benefit"]["real"] or 0)  # prognoza: realne dziś (m-c)
+        prognoza_real = float(result["benefit"]["real"] or 0) 
         gap = max(0.0, round(expected - prognoza_real, 2))
 
         gs = result.get("goal_seek", {}) or {}
-        # jeśli nie osiągamy celu w limicie (MAX_EXTRA=10), pokaż ">10"
         if gs.get("enabled"):
             yn = gs.get("extra_years_needed")
             years_label = ">10" if yn is None else str(int(yn))
@@ -1434,7 +1364,6 @@ def report_pdf(payload: SimInput = Body(...)):
         c.drawString(left2_x, left_list_y, f"• {line}")
         left_list_y -= LINE_H
 
-    # --- PRAWA kolumna: Założenia i parametry
     right_list_y = y_after_cols - 16
     wg_src = "Mentor (średnia płaca)" if result['assumptions_used']['wage_growth_source']=='mentor_avg_wage' \
             else "ENV fallback"
@@ -1446,7 +1375,6 @@ def report_pdf(payload: SimInput = Body(...)):
         f"Średnia emerytura w roku przejścia: {fmt_money(float(result.get('avg_benefit_year') or 0))}",
         f"RR (dziś): {fmt_pct((result.get('replacement_rate_percent') or 0))}",
     ]
-    # ▼ DODAJ: jawna informacja o średniej absencji (dni) i wpływie na świadczenie
     dni_l4 = ASSUMPTIONS.get("absencja_chorobowa", {}).get(payload.sex.upper(), {}).get("dni_rocznie")
     loss_abs = (result.get("sick_leave_impact", {}) or {}).get("loss_abs")
     loss_pct = (result.get("sick_leave_impact", {}) or {}).get("loss_pct")
@@ -1466,10 +1394,8 @@ def report_pdf(payload: SimInput = Body(...)):
     c.drawRightString(w - MARGIN_X, 9, f"Emerytura360 • {dt.date.today().isoformat()}")
 
     # --- STRONA 2: Wykresy z /simulate/timeline ---
-    # Zakończ stronę 1 i zacznij nową
     c.showPage()
 
-    # Nagłówki strony 2
     w, h = A4
     panel_x = MARGIN_X
     panel_w = w - 2 * MARGIN_X
@@ -1477,7 +1403,6 @@ def report_pdf(payload: SimInput = Body(...)):
     c.setFont(FONT_BOLD, 24); c.drawString(panel_x, h - 96, "Jak rośnie Twoja emerytura")
     c.setFont(FONT_BOLD, 14); c.drawString(panel_x, h - 120, "Podstawa (konto+subkonto+waloryzacje) i świadczenie realne")
 
-    # 1) Pobierz timeline (lokalnie, bez HTTP) i wybierz kilka równych punktów na osi czasu
     tl = simulate_timeline(payload, format=None).get("timeline", [])
     if tl:
         target_points = 8
@@ -1495,7 +1420,6 @@ def report_pdf(payload: SimInput = Body(...)):
         x = panel_x
         y_top = h - 170
 
-        # a) Baza po waloryzacjach
         c.setFont(FONT_BOLD, 12); c.setFillColor(ZUS_NAVY)
         c.drawString(x, y_top, "Podstawa po waloryzacjach (koniec roku)")
         draw_simple_bar_chart(
@@ -1509,7 +1433,6 @@ def report_pdf(payload: SimInput = Body(...)):
             colors_fill=[ZUS_BLUE] * len(values_base)
         )
 
-        # b) Świadczenie realne (m-c)
         y2 = y_top - (chart_h + 8) - 40 - chart_h
         c.setFont(FONT_BOLD, 12); c.setFillColor(ZUS_NAVY)
         c.drawString(x, y2 + chart_h + 8, "Prognozowane świadczenie REAL (m-c) – punktowo po latach")
@@ -1530,7 +1453,6 @@ def report_pdf(payload: SimInput = Body(...)):
         c.setFont(FONT_BOLD, 14); c.setFillColor(ZUS_RED)
         c.drawString(panel_x, h - 160, "Brak danych do wykresu timeline.")
 
-    # Stopka strony 2
     c.setFillColor(ZUS_GRAY); c.rect(0, 0, w, 26, fill=1, stroke=0)
     c.setFillColor(ZUS_NAVY); c.setFont(FONT_MAIN, 9)
     c.drawRightString(w - MARGIN_X, 9, f"Emerytura360 • {dt.date.today().isoformat()}")
@@ -1585,11 +1507,9 @@ def export_xls():
 
 @app.post("/admin/clear-logs")
 def clear_logs():
-    # usuń plik i zainicjalizuj nagłówek ponownie
     try:
-        LOG_CSV.unlink(missing_ok=True)  # Python 3.8+: missing_ok
+        LOG_CSV.unlink(missing_ok=True) 
     except TypeError:
-        # fallback dla starszych pythonów
         if LOG_CSV.exists():
             LOG_CSV.unlink()
     ensure_log_header()
@@ -1611,7 +1531,6 @@ def reload_tables():
 
 @app.get("/admin/sources")
 def sources():
-    # skrócony podgląd co mamy w pamięci
     sample_params = None
     if PARAMS:
         y = sorted(PARAMS.keys())[0]

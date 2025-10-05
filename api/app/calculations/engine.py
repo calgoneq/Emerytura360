@@ -1,12 +1,12 @@
 from typing import Dict
 from .waloryzacja import waloryzacja_roczna, waloryzacja_kwartalna, kwartal_map_na_waloryzacje
 
-SKLADKA_RATE = 0.1952  # 19,52% brutto
+SKLADKA_RATE = 0.1952 
 
 def efekt_absencji_factor(dni_rocznie: float | None) -> float:
     if not dni_rocznie:
         return 1.0
-    udzial = max(0.0, min(0.25, float(dni_rocznie) / 365.0))  # cap 25%
+    udzial = max(0.0, min(0.25, float(dni_rocznie) / 365.0))
     return 1.0 - udzial
 
 def waloryzuj_rocznie(skladki_po_latach: Dict[int, float]) -> float:

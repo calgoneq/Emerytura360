@@ -15,6 +15,5 @@ def waloryzacja_kwartalna(rok: int, kwartal: int) -> float:
     return float(A.get("waloryzacja_kwartalna", {}).get(f"{rok}Q{kwartal}", 1.0))
 
 def kwartal_map_na_waloryzacje(rok_przejscia: int, kwartal_przyznania: int) -> tuple[int, int]:
-    # 1Q -> Q3 poprzedniego; 2Q -> Q4 poprzedniego; 3Q -> Q1 bieżącego; 4Q -> Q2 bieżącego
     mapping = {1: (rok_przejscia - 1, 3), 2: (rok_przejscia - 1, 4), 3: (rok_przejscia, 1), 4: (rok_przejscia, 2)}
     return mapping[kwartal_przyznania]
