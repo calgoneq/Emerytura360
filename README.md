@@ -8,6 +8,12 @@ Liczy świadczenie (nominalne i realne), pokazuje wpływ L4, porównuje do śred
 
 ---
 
+<img width="800" height="450" alt="picture-1-b2fd3b jpg-800x450" src="https://github.com/user-attachments/assets/6ce848e1-790b-48f5-9df1-f8112b9c83d6" />
+<img width="800" height="450" alt="picture-2-d53cd6 jpg-800x450" src="https://github.com/user-attachments/assets/4c60bc95-09bc-4c0e-bc13-9f58b12ccefc" />
+<img width="800" height="450" alt="picture-3-fab927 jpg-800x450" src="https://github.com/user-attachments/assets/bb5c83a1-250d-4776-abd1-00b5471259a6" />
+<img width="800" height="450" alt="picture-4-387f3e jpg-800x450" src="https://github.com/user-attachments/assets/c4548d05-d5c8-4bbe-8b3b-7db5a58f4653" />
+
+
 ## Spis treści
 
 - [Architektura](#architektura)
